@@ -1,4 +1,5 @@
 import { config } from '../config/config';
+import {CleanRedditComment, RedditDataCleaner} from "../utils/redditDataCleaner";
 
 interface RedditResponse {
     data: {
@@ -15,6 +16,7 @@ interface RedditComment {
         body?: string;
         author?: string;
         created_utc: number;
+        score?: number;
         replies?: {
             data?: {
                 children: RedditComment[];
@@ -28,6 +30,7 @@ interface ParsedComment {
     body?: string;
     author?: string;
     created_utc: number;
+    score?: number;
     replies: ParsedComment[];
 }
 
@@ -78,7 +81,7 @@ export class RedditService {
             const data = await response.json();
             if (Array.isArray(data) && data.length > 0 && data[0].data && data[0].data.children.length > 0) {
                 // Return the post as an array for consistency
-                return [data[0].data.children[0].data];
+                return [RedditDataCleaner.cleanPost([data[0].data.children[0].data])];
             }
             return [];
         } else {
@@ -93,7 +96,8 @@ export class RedditService {
                 }
             );
             const data = await response.json() as RedditResponse;
-            return data.data.children.map(post => post.data);
+            const rawPosts = data.data.children.map(post => post.data);
+            return RedditDataCleaner.cleanPosts(rawPosts);
         }
     }
 
@@ -110,10 +114,11 @@ export class RedditService {
         );
 
         const data = await response.json() as RedditResponse;
-        return data.data.children.map(post => post.data);
+        const rawPosts = data.data.children.map(post => post.data);
+        RedditDataCleaner.cleanPosts(rawPosts);
     }
 
-    async getPostComments(postId: string, subreddit: string): Promise<any[]> {
+    async getPostComments(postId: string, subreddit: string): Promise<CleanRedditComment[]> {
         const token = await this.getAccessToken();
         const response = await fetch(
             `https://oauth.reddit.com/r/${subreddit}/comments/${postId}.json`,
@@ -131,7 +136,8 @@ export class RedditService {
         }
 
         // data[0] contains the post, data[1] contains the comments
-        return this.parseComments(data[1].data.children);
+        const rawComments = this.parseComments(data[1].data.children);
+        return RedditDataCleaner.cleanComments(rawComments);
     }
 
     private parseComments(comments: RedditComment[]): ParsedComment[] {
@@ -146,6 +152,7 @@ export class RedditService {
                     body: comment.data.body,
                     author: comment.data.author,
                     created_utc: comment.data.created_utc,
+                    score: comment.data.score,
                     replies: [],
                 };
 

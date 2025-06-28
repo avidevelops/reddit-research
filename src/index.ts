@@ -7,6 +7,7 @@ import { specs } from './config/swagger';
 import { apiErrorHandler } from './middleware/errorMiddleware';
 import scrapingRoutes from './routes/scraping';
 import searchRoutes from './routes/search';
+import trendingRoutes from "./routes/trending";
 import { Logger } from './utils/logger';
 
 const app = express();
@@ -21,6 +22,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 // Routes
 app.use('/api', searchRoutes);
 app.use('/api/scrape', scrapingRoutes);
+app.use('/api/trending', trendingRoutes);
 
 // Error handling
 app.use((req, res, next) => {

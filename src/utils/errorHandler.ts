@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import Logger from './logger';
+import { Logger } from './logger';
 
 export class ErrorHandler {
     static handleError = (err: Error, req: Request, res: Response, next: NextFunction) => {
