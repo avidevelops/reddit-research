@@ -140,3 +140,7 @@ vite.config.ts.timestamp-*
 
 # Temporary files created by the service
 reddit-*.txt
+
+.idea/
+.DS_Store
+reference-materials/
