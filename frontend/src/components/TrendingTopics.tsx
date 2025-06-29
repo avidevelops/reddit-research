@@ -127,6 +127,7 @@ interface TrendingAnalysis {
 const categoryColors: Record<string, string> = {
   'Technology': 'blue',
   'Software development': 'purple',
+  'AI-Artificial Intelligence': 'teal',
   'Life': 'green',
   'Self-improvement': 'yellow',
   'Work': 'orange',

@@ -7,7 +7,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 interface TrendingTopic {
     topic: string;
-    category: 'Life' | 'Self-improvement' | 'Work' | 'Technology' | 'Software development' | 'Society' | 'Culture' | 'World' | 'Finance';
+    category: 'Life' | 'Self-improvement' | 'Work' | 'Technology' | 'Software development' | 'AI-Artificial Intelligence' | 'Society' | 'Culture' | 'World' | 'Finance';
     engagementScore: number;
     viralPotential: number;
     mediumSuccessProbability: number;
@@ -53,7 +53,7 @@ export class TrendingTopicsService {
     {posts}
     
     For each significant topic found, evaluate:
-    1. What category it belongs to (Life/Self-improvement/Work/Technology/Software development/Society/Culture/World/Finance)
+    1. What category it belongs to (Life/Self-improvement/Work/Technology/Software development/AI-ArtificialIntelligence/Society/Culture/World/Finance)
     2. Engagement metrics (based on scores, comments, discussion quality)
     3. Viral potential on Medium (0-100)
     4. Key themes being discussed

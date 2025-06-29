@@ -78,22 +78,22 @@ export class TrendingController {
                 for (const topic of topTopics) {
                     try {
                         // Find relevant posts for this topic
-                        const relevantPostIds = recentPosts
-                            .filter(post => 
-                                post.title.toLowerCase().includes(topic.topic.toLowerCase()) ||
-                                (post.selftext && post.selftext.toLowerCase().includes(topic.topic.toLowerCase()))
-                            )
-                            .slice(0, 5)
-                            .map(post => post.id);
-
-                        // If no specific posts match, use top engaged posts
-                        if (relevantPostIds.length === 0) {
-                            relevantPostIds.push(...analysis.posts.slice(0, 5).map(p => p.id));
-                        }
+                        // const relevantPostIds = recentPosts
+                        //     .filter(post =>
+                        //         post.title.toLowerCase().includes(topic.topic.toLowerCase()) ||
+                        //         (post.selftext && post.selftext.toLowerCase().includes(topic.topic.toLowerCase()))
+                        //     )
+                        //     .slice(0, 5)
+                        //     .map(post => post.id);
+                        //
+                        // // If no specific posts match, use top engaged posts
+                        // if (relevantPostIds.length === 0) {
+                        //     relevantPostIds.push(...analysis.posts.slice(0, 5).map(p => p.id));
+                        // }
 
                         const referenceMaterial = await this.referenceMaterialService.gatherReferenceMaterial(
                             topic.topic,
-                            relevantPostIds,
+                            topic.relevantPosts!.map(rp => rp.id),
                             subreddit
                         );
 
@@ -238,27 +238,27 @@ export class TrendingController {
                 for (const topic of topicsForReferences) {
                     try {
                         // Find relevant posts for this topic from its source subreddit
-                        const relevantPostIds = topic.sourcePosts
-                            .filter(post => 
-                                post.title.toLowerCase().includes(topic.topic.toLowerCase()) ||
-                                (post.selftext && post.selftext.toLowerCase().includes(topic.topic.toLowerCase()))
-                            )
-                            .slice(0, 5)
-                            .map(post => post.id);
-
-                        // If no specific posts match, use top engaged posts from that subreddit
-                        if (relevantPostIds.length === 0) {
-                            relevantPostIds.push(
-                                ...topic.sourcePosts
-                                    .sort((a, b) => (b.score + b.num_comments * 2) - (a.score + a.num_comments * 2))
-                                    .slice(0, 5)
-                                    .map(p => p.id)
-                            );
-                        }
+                        // const relevantPostIds = topic.sourcePosts
+                        //     .filter(post =>
+                        //         post.title.toLowerCase().includes(topic.topic.toLowerCase()) ||
+                        //         (post.selftext && post.selftext.toLowerCase().includes(topic.topic.toLowerCase()))
+                        //     )
+                        //     .slice(0, 5)
+                        //     .map(post => post.id);
+                        //
+                        // // If no specific posts match, use top engaged posts from that subreddit
+                        // if (relevantPostIds.length === 0) {
+                        //     relevantPostIds.push(
+                        //         ...topic.sourcePosts
+                        //             .sort((a, b) => (b.score + b.num_comments * 2) - (a.score + a.num_comments * 2))
+                        //             .slice(0, 5)
+                        //             .map(p => p.id)
+                        //     );
+                        // }
 
                         const referenceMaterial = await this.referenceMaterialService.gatherReferenceMaterial(
                             topic.topic,
-                            relevantPostIds,
+                            topic.relevantPosts!.map(rp => rp.id),
                             topic.source
                         );
 

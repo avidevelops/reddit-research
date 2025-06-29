@@ -1,11 +1,13 @@
 import { config } from '../config/config';
-import {CleanRedditComment, RedditDataCleaner} from "../utils/redditDataCleaner";
+import {CleanRedditComment, CleanRedditPost, RedditDataCleaner} from "../utils/redditDataCleaner";
 
 interface RedditResponse {
     data: {
         children: Array<{
             data: any;
         }>;
+        after?: string | null;  // Add this for pagination
+        before?: string | null; // Optional: for backward pagination
     };
 }
 
@@ -81,7 +83,7 @@ export class RedditService {
             const data = await response.json();
             if (Array.isArray(data) && data.length > 0 && data[0].data && data[0].data.children.length > 0) {
                 // Return the post as an array for consistency
-                return [RedditDataCleaner.cleanPost([data[0].data.children[0].data])];
+                return [RedditDataCleaner.cleanPost(data[0].data.children[0].data)];
             }
             return [];
         } else {
@@ -101,7 +103,7 @@ export class RedditService {
         }
     }
 
-    async searchSubreddit(subreddit: string, query: string) {
+    async searchSubreddit(subreddit: string, query: string): Promise<CleanRedditPost[]> {
         const token = await this.getAccessToken();
         const response = await fetch(
             `https://oauth.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=true`,
@@ -115,7 +117,7 @@ export class RedditService {
 
         const data = await response.json() as RedditResponse;
         const rawPosts = data.data.children.map(post => post.data);
-        RedditDataCleaner.cleanPosts(rawPosts);
+        return RedditDataCleaner.cleanPosts(rawPosts);
     }
 
     async getPostComments(postId: string, subreddit: string): Promise<CleanRedditComment[]> {
@@ -164,5 +166,129 @@ export class RedditService {
                 return parsed;
             })
             .filter((c): c is ParsedComment => c !== null); // Remove null entries and narrow type
+    }
+
+    /**
+     * Fetches posts from a subreddit within a specific timeframe using Reddit's search API
+     * @param subreddit - The subreddit name
+     * @param afterTimestamp - Unix timestamp for the start of the time range
+     * @param beforeTimestamp - Unix timestamp for the end of the time range
+     * @param limit - Optional limit for the number of posts (if not provided, fetches all in timeframe)
+     */
+    async getSubredditPostsByTimeframe(
+        subreddit: string,
+        afterTimestamp: number,
+        beforeTimestamp: number,
+        limit?: number
+    ) : Promise<CleanRedditPost[]> {
+        const token = await this.getAccessToken();
+
+        // Reddit uses cloudsearch syntax for timestamp queries
+        const query = `timestamp:${afterTimestamp}..${beforeTimestamp}`;
+
+        // Build the URL with search parameters
+        const params = new URLSearchParams({
+            q: query,
+            restrict_sr: 'true',
+            sort: 'new',
+            syntax: 'cloudsearch',
+            ...(limit && { limit: limit.toString() })
+        });
+
+        const response = await fetch(
+            `https://oauth.reddit.com/r/${subreddit}/search.json?${params}`,
+            {
+                headers: new Headers({
+                    'Authorization': `Bearer ${token}`,
+                    'User-Agent': config.reddit.userAgent || '',
+                }),
+            }
+        );
+
+        const data = await response.json() as RedditResponse;
+
+        if (!data.data || !data.data.children) {
+            return [];
+        }
+
+        const rawPosts = data.data.children.map(post => post.data);
+        return RedditDataCleaner.cleanPosts(rawPosts);
+    }
+
+    /**
+     * Alternative method using the regular posts endpoint with time-based sorting
+     * This is more reliable but requires pagination for complete results
+     */
+    async getSubredditPostsByTimeframeAlternative(
+        subreddit: string,
+        afterTimestamp: number,
+        beforeTimestamp: number,
+        limit?: number
+    ): Promise<CleanRedditPost[]> {
+        const token = await this.getAccessToken();
+        const allPosts: any[] = [];
+        let after: string | null = null;
+        const maxIterations = 10; // Prevent infinite loops
+        let iterations = 0;
+
+        // If no limit specified, we'll fetch up to 1000 posts
+        const targetCount = limit || 1000;
+
+        while (allPosts.length < targetCount && iterations < maxIterations) {
+            const batchSize = Math.min(100, targetCount - allPosts.length);
+
+            const params = new URLSearchParams({
+                limit: batchSize.toString(),
+                raw_json: '1',
+            });
+
+            if (after) {
+                params.append('after', after);
+            }
+
+            const response = await fetch(
+                `https://oauth.reddit.com/r/${subreddit}/new.json?${params}`,
+                {
+                    headers: new Headers({
+                        'Authorization': `Bearer ${token}`,
+                        'User-Agent': config.reddit.userAgent || '',
+                    }),
+                }
+            );
+
+            const data = await response.json() as RedditResponse;
+
+            if (!data.data || !data.data.children || data.data.children.length === 0) {
+                break;
+            }
+
+            // Filter posts by timestamp
+            const postsInRange = data.data.children
+                .map(post => post.data)
+                .filter(post =>
+                    post.created_utc >= afterTimestamp &&
+                    post.created_utc <= beforeTimestamp
+                );
+
+            allPosts.push(...postsInRange);
+
+            // Check if we've gone past our time range
+            const oldestPost = data.data.children[data.data.children.length - 1]?.data;
+            if (oldestPost && oldestPost.created_utc < afterTimestamp) {
+                break;
+            }
+
+            // Set up for next iteration
+            if (data.data.after) {
+                after = data.data.after;
+                if (!after) break;
+            } else {
+                break;
+            }
+
+            iterations++;
+        }
+
+        return RedditDataCleaner.cleanPosts(allPosts.slice(0, targetCount));
     }
 }

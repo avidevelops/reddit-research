@@ -136,6 +136,178 @@ import { asyncHandler } from '../utils/asyncHandler';
  *         description: Successfully analyzed trends across subreddits
  */
 
+/**
+ * @swagger
+ * /api/trending/{subreddit}/references:
+ *   post:
+ *     summary: Gather reference material for a specific topic
+ *     description: Fetches full posts and comments to extract quotes, insights, and reference material for writing Medium articles
+ *     tags: [Trending]
+ *     parameters:
+ *       - in: path
+ *         name: subreddit
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Name of the subreddit
+ *         example: technology
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - topic
+ *               - postIds
+ *             properties:
+ *               topic:
+ *                 type: string
+ *                 description: The topic to gather references for
+ *                 example: "AI Ethics in Healthcare"
+ *               postIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of Reddit post IDs to analyze
+ *                 example: ["1a2b3c", "4d5e6f", "7g8h9i"]
+ *     responses:
+ *       200:
+ *         description: Successfully gathered reference material
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 topic:
+ *                   type: string
+ *                   example: "AI Ethics in Healthcare"
+ *                 subreddit:
+ *                   type: string
+ *                   example: "technology"
+ *                 postsAnalyzed:
+ *                   type: integer
+ *                   description: Number of posts analyzed
+ *                   example: 5
+ *                 totalComments:
+ *                   type: integer
+ *                   description: Total number of comments analyzed
+ *                   example: 127
+ *                 filepath:
+ *                   type: string
+ *                   description: Path where reference material was saved
+ *                   example: "/reference-materials/technology-1234567890-reference.json"
+ *                 summary:
+ *                   type: object
+ *                   properties:
+ *                     keyInsights:
+ *                       type: integer
+ *                       example: 12
+ *                     quotableComments:
+ *                       type: integer
+ *                       example: 8
+ *                     painPoints:
+ *                       type: integer
+ *                       example: 5
+ *                     successStories:
+ *                       type: integer
+ *                       example: 3
+ *                 referenceMaterial:
+ *                   type: object
+ *                   properties:
+ *                     topicId:
+ *                       type: string
+ *                       example: "technology-1234567890"
+ *                     topic:
+ *                       type: string
+ *                     sourcePosts:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     keyInsights:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     quotableComments:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           text:
+ *                             type: string
+ *                           author:
+ *                             type: string
+ *                           context:
+ *                             type: string
+ *                           relevance:
+ *                             type: string
+ *                     commonPainPoints:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     successStories:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     controversialPoints:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     expertOpinions:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     statistics:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           metric:
+ *                             type: string
+ *                           value:
+ *                             type: string
+ *                           context:
+ *                             type: string
+ *                     narrativeElements:
+ *                       type: object
+ *                       properties:
+ *                         hooks:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                         personalStories:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                         transformations:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *       400:
+ *         description: Missing required parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Missing required parameters. Need subreddit, topic, and postIds array."
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Failed to gather reference material"
+ */
+
 const router = Router();
 const trendingController = new TrendingController();
 
