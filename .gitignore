@@ -144,3 +144,4 @@ reddit-*.txt
 .idea/
 .DS_Store
 reference-materials/
+/story-outputs/

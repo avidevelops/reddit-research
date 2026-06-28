@@ -1,10 +1,11 @@
 import { randomUUID } from 'crypto';
 import { ApiError } from '../middleware/errorMiddleware';
-import { ArticleBrief, ArticleDraft, EditorialReview, PipelineRequest, PipelineRun, PipelineTimeframe, ResearchBundle, TopicOpportunity } from '../types/pipeline';
+import { ArticleBrief, ArticleDraft, EditorialReview, PipelineProgressCallback, PipelineRequest, PipelineRun, PipelineTimeframe, ResearchBundle, TopicOpportunity } from '../types/pipeline';
 import { CleanRedditPost } from '../utils/redditDataCleaner';
 import { isArticleBrief, isArticleDraft, isEditorialReview } from '../utils/pipelineValidators';
 import { Logger } from '../utils/logger';
 import { ArtifactStorageService } from './ArtifactStorageService';
+import { ArticleQualityService } from './ArticleQualityService';
 import { LLMService } from './LLMService';
 import { RedditService } from './RedditService';
 import { ReferenceMaterial, ReferenceMaterialService } from './ReferenceMaterialService';
@@ -38,8 +39,9 @@ export class ArticlePipelineService {
         this.referenceMaterialService = referenceMaterialService;
     }
 
-    async runPipeline(request: PipelineRequest): Promise<PipelineRun> {
+    async runPipeline(request: PipelineRequest, onProgress?: PipelineProgressCallback): Promise<PipelineRun> {
         const normalized = this.normalizeRequest(request);
+        onProgress?.('stage', { stage: 'discovering', subreddits: normalized.subreddits });
         const analyses = await this.discoverAndAnalyze(normalized);
         const opportunities = this.buildOpportunities(analyses);
         const selectedOpportunity = opportunities[0];
@@ -48,12 +50,17 @@ export class ArticlePipelineService {
             throw new ApiError(404, 'No viable story opportunities found');
         }
 
+        onProgress?.('stage', { stage: 'opportunities', count: opportunities.length, topTopic: selectedOpportunity.topic });
+        onProgress?.('stage', { stage: 'researching', topic: selectedOpportunity.topic });
         const researchBundle = await this.gatherResearchBundle(selectedOpportunity, normalized.topicsToGather);
+        onProgress?.('stage', { stage: 'briefing' });
         const articleBrief = await this.generateBrief(researchBundle, normalized);
+        onProgress?.('stage', { stage: 'drafting', wordEstimate: selectedOpportunity.estimatedReadTime * 220 });
         const draft = await this.generateDraft(articleBrief, researchBundle, normalized);
+        onProgress?.('stage', { stage: 'editing' });
         const editorialReview = await this.editDraft(draft, articleBrief, researchBundle, normalized);
 
-        const runBase = {
+        const runBase: Omit<PipelineRun, 'artifacts'> = {
             id: randomUUID(),
             createdAt: new Date().toISOString(),
             request: normalized,
@@ -64,6 +71,14 @@ export class ArticlePipelineService {
             draft,
             editorialReview,
         };
+
+        const qualityRun = { ...runBase, artifacts: { directory: '', files: {} } };
+        const improvement = await ArticleQualityService.improveIfNeeded(qualityRun);
+        runBase.editorialReview = {
+            ...qualityRun.editorialReview,
+            qualityGate: improvement.qualityGate,
+        };
+        onProgress?.('stage', { stage: 'quality', score: improvement.finalScore, improved: improvement.improved });
 
         const runDirectory = ArtifactStorageService.buildRunDirectory(selectedOpportunity.topic, normalized.outputDir);
         const artifacts = await ArtifactStorageService.saveRunArtifacts({
@@ -76,7 +91,9 @@ export class ArticlePipelineService {
         });
 
         Logger.info(`Pipeline run ${runBase.id} saved to ${artifacts.directory}`);
-        return { ...runBase, artifacts };
+        const run = { ...runBase, artifacts };
+        onProgress?.('complete', run);
+        return run;
     }
 
     async generateBrief(
@@ -192,6 +209,46 @@ Return strict JSON:
 }`;
 
         return LLMService.generateJson(prompt, isEditorialReview, 'editorial review');
+    }
+
+    async regenerateSection(
+        run: PipelineRun,
+        sectionIndex: number,
+        instruction?: string
+    ): Promise<{ updatedMarkdown: string }> {
+        const section = run.articleBrief.outline[sectionIndex];
+        if (!section) {
+            throw new ApiError(400, 'Invalid sectionIndex');
+        }
+
+        const prompt = `
+Regenerate one Markdown section from this article. Return strict JSON:
+{
+  "updatedMarkdown": "complete article markdown with only the requested section changed"
+}
+
+Section to regenerate:
+${JSON.stringify(section, null, 2)}
+
+Instruction:
+${instruction || 'Improve clarity, originality, and evidence density while preserving sources.'}
+
+Full article:
+${run.editorialReview.finalMarkdown}`;
+
+        const result = await LLMService.generateJson(
+            prompt,
+            (value): value is { updatedMarkdown: string } => (
+                typeof value === 'object' &&
+                value !== null &&
+                typeof (value as { updatedMarkdown?: unknown }).updatedMarkdown === 'string'
+            ),
+            'section regeneration'
+        );
+
+        run.editorialReview.finalMarkdown = result.updatedMarkdown;
+        await ArtifactStorageService.updateRun(run);
+        return result;
     }
 
     private normalizeRequest(request: PipelineRequest): NormalizedPipelineRequest {

@@ -1,4 +1,5 @@
 import { ArticlePipelineService } from '../services/ArticlePipelineService';
+import { ArticleQualityService } from '../services/ArticleQualityService';
 import { ArtifactStorageService } from '../services/ArtifactStorageService';
 import { LLMService } from '../services/LLMService';
 import { ReferenceMaterialService } from '../services/ReferenceMaterialService';
@@ -109,6 +110,25 @@ describe('ArticlePipelineService', () => {
             if (label.includes('draft')) return draft as never;
             return review as never;
         });
+        jest.spyOn(ArticleQualityService, 'improveIfNeeded').mockImplementation(async (run) => ({
+            improved: false,
+            finalMarkdown: run.editorialReview.finalMarkdown,
+            finalScore: 88,
+            qualityGate: {
+                passed: true,
+                score: 88,
+                dimensionScores: {
+                    hookStrength: 88,
+                    thesisClarity: 88,
+                    evidenceDensity: 88,
+                    narrativeArc: 88,
+                    mediumFormatCompliance: 88,
+                    originality: 88,
+                },
+                blockers: [],
+                suggestions: [],
+            },
+        }));
         jest.spyOn(ArtifactStorageService, 'saveRunArtifacts').mockResolvedValue({
             directory: 'story-outputs/2026-01-01-ai-tooling',
             files: {

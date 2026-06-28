@@ -166,6 +166,24 @@ export interface EditorialReview {
     improvements: string[];
     factCheckNotes: string[];
     finalMarkdown: string;
+    qualityGate?: QualityGate;
+}
+
+export interface QualityDimensionScores {
+    hookStrength: number;
+    thesisClarity: number;
+    evidenceDensity: number;
+    narrativeArc: number;
+    mediumFormatCompliance: number;
+    originality: number;
+}
+
+export interface QualityGate {
+    passed: boolean;
+    score: number;
+    dimensionScores: QualityDimensionScores;
+    blockers: string[];
+    suggestions: string[];
 }
 
 export interface PipelineArtifacts {
@@ -194,4 +212,30 @@ export interface PipelineRun {
     draft: ArticleDraft;
     editorialReview: EditorialReview;
     artifacts: PipelineArtifacts;
+}
+
+export interface PipelineRunMetadata {
+    id: string;
+    topic: string;
+    createdAt: string;
+    score: number;
+    wordCount: number;
+    estimatedReadTime: number;
+    directory: string;
+}
+
+export interface PipelineProviders {
+    activeProvider: 'gemini' | 'lmstudio' | 'claude';
+    model: string;
+    providers: Array<'gemini' | 'lmstudio' | 'claude'>;
+}
+
+export interface PipelineProgressEvent {
+    event: string;
+    data: unknown;
+}
+
+export interface PipelineStageEvent {
+    stage: string;
+    [key: string]: unknown;
 }
