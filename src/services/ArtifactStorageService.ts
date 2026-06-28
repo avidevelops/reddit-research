@@ -6,6 +6,7 @@ import {
     EditorialReview,
     PipelineArtifacts,
     PipelineRun,
+    PipelineRunMetadata,
     ResearchBundle,
 } from '../types/pipeline';
 
@@ -69,6 +70,64 @@ export class ArtifactStorageService {
         return artifacts;
     }
 
+    static async listRuns(outputDir?: string): Promise<PipelineRunMetadata[]> {
+        const root = this.resolveOutputRoot(outputDir);
+        const runFiles = await this.findRunFiles(root);
+        const runs = await Promise.all(runFiles.map(async file => {
+            const run = await this.readRunFile(file);
+            return this.toMetadata(run);
+        }));
+
+        return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }
+
+    static async getRun(runId: string, outputDir?: string): Promise<PipelineRun | null> {
+        const runFile = await this.findRunFileById(runId, outputDir);
+        return runFile ? this.readRunFile(runFile) : null;
+    }
+
+    static async deleteRun(runId: string, outputDir?: string): Promise<boolean> {
+        const runFile = await this.findRunFileById(runId, outputDir);
+        if (!runFile) {
+            return false;
+        }
+
+        await fs.rm(path.dirname(runFile), { recursive: true, force: true });
+        return true;
+    }
+
+    static async updateRun(run: PipelineRun): Promise<PipelineRun> {
+        await Promise.all([
+            fs.writeFile(run.artifacts.files.pipelineRun, JSON.stringify(run, null, 2)),
+            fs.writeFile(run.artifacts.files.editedStory, run.editorialReview.finalMarkdown),
+            fs.writeFile(run.artifacts.files.editorialReview, JSON.stringify(run.editorialReview, null, 2)),
+            fs.writeFile(run.artifacts.files.draft, run.draft.markdown),
+        ]);
+        return run;
+    }
+
+    static exportRun(run: PipelineRun, format: 'markdown' | 'html' | 'plaintext'): string {
+        const markdown = run.editorialReview.finalMarkdown || run.draft.markdown;
+        if (format === 'html') {
+            return this.markdownToHtml(markdown);
+        }
+        if (format === 'plaintext') {
+            return this.markdownToPlainText(markdown);
+        }
+        return markdown;
+    }
+
+    static getExportContentType(format: 'markdown' | 'html' | 'plaintext'): string {
+        if (format === 'html') return 'text/html; charset=utf-8';
+        if (format === 'plaintext') return 'text/plain; charset=utf-8';
+        return 'text/markdown; charset=utf-8';
+    }
+
+    static getExportFilename(run: PipelineRun, format: 'markdown' | 'html' | 'plaintext'): string {
+        const extension = format === 'html' ? 'html' : format === 'plaintext' ? 'txt' : 'md';
+        return `${this.slugify(run.selectedOpportunity.topic)}.${extension}`;
+    }
+
     static renderBriefMarkdown(brief: ArticleBrief): string {
         const outline = brief.outline
             .map(section => [
@@ -110,5 +169,112 @@ export class ArtifactStorageService {
             ...brief.risks.map(item => `- ${item}`),
             '',
         ].join('\n');
+    }
+
+    private static async findRunFileById(runId: string, outputDir?: string): Promise<string | null> {
+        const root = this.resolveOutputRoot(outputDir);
+        const runFiles = await this.findRunFiles(root);
+
+        for (const file of runFiles) {
+            const run = await this.readRunFile(file);
+            if (run.id === runId) {
+                return file;
+            }
+        }
+
+        return null;
+    }
+
+    private static async findRunFiles(root: string): Promise<string[]> {
+        try {
+            const entries = await fs.readdir(root, { withFileTypes: true });
+            const files = await Promise.all(entries
+                .filter(entry => entry.isDirectory())
+                .map(async entry => {
+                    const runFile = path.join(root, entry.name, 'pipeline-run.json');
+                    try {
+                        await fs.access(runFile);
+                        return runFile;
+                    } catch {
+                        return null;
+                    }
+                }));
+
+            return files.filter((file): file is string => Boolean(file));
+        } catch (error: any) {
+            if (error?.code === 'ENOENT') {
+                return [];
+            }
+            throw error;
+        }
+    }
+
+    private static async readRunFile(file: string): Promise<PipelineRun> {
+        const content = await fs.readFile(file, 'utf8');
+        return JSON.parse(content) as PipelineRun;
+    }
+
+    private static toMetadata(run: PipelineRun): PipelineRunMetadata {
+        const finalMarkdown = run.editorialReview.finalMarkdown || run.draft.markdown || '';
+        return {
+            id: run.id,
+            topic: run.selectedOpportunity.topic,
+            createdAt: run.createdAt,
+            score: run.editorialReview.qualityGate?.score ?? run.editorialReview.score,
+            wordCount: this.countWords(finalMarkdown),
+            estimatedReadTime: run.draft.estimatedReadTime,
+            directory: run.artifacts.directory,
+        };
+    }
+
+    private static countWords(text: string): number {
+        return text.trim().split(/\s+/).filter(Boolean).length;
+    }
+
+    private static markdownToPlainText(markdown: string): string {
+        return markdown
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+            .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+            .replace(/^#{1,6}\s+/gm, '')
+            .replace(/^>\s?/gm, '')
+            .replace(/^\s*[-*+]\s+/gm, '')
+            .replace(/^\s*\d+\.\s+/gm, '')
+            .replace(/[*_~]/g, '')
+            .trim();
+    }
+
+    private static markdownToHtml(markdown: string): string {
+        const escapeHtml = (value: string) => value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        const body = markdown.split(/\n{2,}/)
+            .map(block => {
+                const trimmed = block.trim();
+                if (!trimmed) return '';
+                const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+                if (heading) {
+                    const level = heading[1].length;
+                    return `<h${level}>${escapeHtml(heading[2])}</h${level}>`;
+                }
+                if (trimmed.startsWith('>')) {
+                    return `<blockquote>${escapeHtml(trimmed.replace(/^>\s?/gm, ''))}</blockquote>`;
+                }
+                if (/^[-*+]\s+/m.test(trimmed)) {
+                    const items = trimmed.split('\n')
+                        .map(line => line.replace(/^[-*+]\s+/, '').trim())
+                        .filter(Boolean)
+                        .map(item => `<li>${escapeHtml(item)}</li>`)
+                        .join('');
+                    return `<ul>${items}</ul>`;
+                }
+                return `<p>${escapeHtml(trimmed).replace(/\n/g, '<br>')}</p>`;
+            })
+            .join('\n');
+
+        return `<!doctype html><html><head><meta charset="utf-8"><title>Story Export</title></head><body>${body}</body></html>`;
     }
 }

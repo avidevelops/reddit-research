@@ -21,6 +21,7 @@ describe('ArtifactStorageService', () => {
             outline: [{ heading: 'Opening', purpose: 'Set stakes', evidence: ['Reddit source'] }],
             counterarguments: ['A counterpoint'],
             practicalTakeaways: ['Do the thing'],
+            authorStance: 'I believe the story needs a sharper stance.',
             sourceNotes: ['Source note'],
             risks: ['Avoid overclaiming'],
         });
@@ -28,5 +29,25 @@ describe('ArtifactStorageService', () => {
         expect(markdown).toContain('# A Better Story');
         expect(markdown).toContain('### Opening');
         expect(markdown).toContain('- Do the thing');
+        expect(markdown).toContain('## Author Stance');
+    });
+
+    it('exports runs as markdown, html, and plaintext', () => {
+        const run = {
+            selectedOpportunity: { topic: 'AI Tooling' },
+            draft: { markdown: '# Draft', estimatedReadTime: 4 },
+            editorialReview: {
+                score: 81,
+                strengths: [],
+                improvements: [],
+                factCheckNotes: [],
+                finalMarkdown: '# Final Story\n\n> A quote\n\n- One point',
+            },
+        } as any;
+
+        expect(ArtifactStorageService.exportRun(run, 'markdown')).toContain('# Final Story');
+        expect(ArtifactStorageService.exportRun(run, 'html')).toContain('<h1>Final Story</h1>');
+        expect(ArtifactStorageService.exportRun(run, 'plaintext')).not.toContain('#');
+        expect(ArtifactStorageService.getExportFilename(run, 'plaintext')).toBe('ai-tooling.txt');
     });
 });

@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
+import { config } from '../config/config';
 import { ArticlePipelineService } from '../services/ArticlePipelineService';
+import { ArtifactStorageService } from '../services/ArtifactStorageService';
+import { ApiError } from '../middleware/errorMiddleware';
 import { Logger } from '../utils/logger';
+import { SSEEmitter } from '../utils/sseEmitter';
 
 export class PipelineController {
     private pipelineService: ArticlePipelineService;
@@ -9,7 +13,26 @@ export class PipelineController {
         this.pipelineService = pipelineService;
     }
 
-    async runPipeline(req: Request, res: Response): Promise<void> {
+    async streamPipeline(req: Request, res: Response): Promise<void> {
+        const sse = new SSEEmitter(res);
+        req.setTimeout(600000, () => {
+            sse.emit('error', { error: 'Request timeout' });
+            sse.done();
+        });
+
+        try {
+            await this.pipelineService.runPipeline(req.body, (event, data) => {
+                sse.emit(event, data);
+            });
+            sse.done();
+        } catch (error: any) {
+            Logger.error('Pipeline stream failed', error);
+            sse.emit('error', { error: error?.message || 'Pipeline failed' });
+            sse.done();
+        }
+    }
+
+    async runPipelineSync(req: Request, res: Response): Promise<void> {
         try {
             const result = await this.pipelineService.runPipeline(req.body);
             res.json(result);
@@ -17,6 +40,64 @@ export class PipelineController {
             Logger.error('Pipeline run failed', error);
             throw error;
         }
+    }
+
+    async listRuns(req: Request, res: Response): Promise<void> {
+        const runs = await ArtifactStorageService.listRuns(req.query.outputDir?.toString());
+        res.json({ runs });
+    }
+
+    async getRun(req: Request, res: Response): Promise<void> {
+        const run = await ArtifactStorageService.getRun(req.params.runId, req.query.outputDir?.toString());
+        if (!run) {
+            throw new ApiError(404, 'Pipeline run not found');
+        }
+        res.json(run);
+    }
+
+    async exportRun(req: Request, res: Response): Promise<void> {
+        const format = this.getExportFormat(req.query.format?.toString());
+        const run = await ArtifactStorageService.getRun(req.params.runId, req.query.outputDir?.toString());
+        if (!run) {
+            throw new ApiError(404, 'Pipeline run not found');
+        }
+
+        const content = ArtifactStorageService.exportRun(run, format);
+        const filename = ArtifactStorageService.getExportFilename(run, format);
+        res.setHeader('Content-Type', ArtifactStorageService.getExportContentType(format));
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(content);
+    }
+
+    async deleteRun(req: Request, res: Response): Promise<void> {
+        const deleted = await ArtifactStorageService.deleteRun(req.params.runId, req.query.outputDir?.toString());
+        if (!deleted) {
+            throw new ApiError(404, 'Pipeline run not found');
+        }
+        res.status(204).send();
+    }
+
+    async regenerateSection(req: Request, res: Response): Promise<void> {
+        const run = await ArtifactStorageService.getRun(req.params.runId, req.query.outputDir?.toString());
+        if (!run) {
+            throw new ApiError(404, 'Pipeline run not found');
+        }
+
+        const { sectionIndex, instruction } = req.body;
+        if (typeof sectionIndex !== 'number') {
+            throw new ApiError(400, 'sectionIndex must be a number');
+        }
+
+        const result = await this.pipelineService.regenerateSection(run, sectionIndex, instruction);
+        res.json(result);
+    }
+
+    async getProviders(req: Request, res: Response): Promise<void> {
+        res.json({
+            activeProvider: config.llmProvider,
+            model: config.model,
+            providers: ['gemini', 'lmstudio', 'claude'],
+        });
     }
 
     async generateBrief(req: Request, res: Response): Promise<void> {
@@ -71,5 +152,11 @@ export class PipelineController {
             Logger.error('Draft editing failed', error);
             throw error;
         }
+    }
+
+    private getExportFormat(format?: string): 'markdown' | 'html' | 'plaintext' {
+        if (!format) return 'markdown';
+        if (format === 'html' || format === 'plaintext' || format === 'markdown') return format;
+        throw new ApiError(400, 'format must be markdown, html, or plaintext');
     }
 }
