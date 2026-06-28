@@ -5,9 +5,10 @@ import swaggerUi from 'swagger-ui-express';
 import { config } from './config/config';
 import { specs } from './config/swagger';
 import { apiErrorHandler } from './middleware/errorMiddleware';
+import pipelineRoutes from './routes/pipeline';
 import scrapingRoutes from './routes/scraping';
 import searchRoutes from './routes/search';
-import trendingRoutes from "./routes/trending";
+import trendingRoutes from './routes/trending';
 import { Logger } from './utils/logger';
 
 const app = express();
@@ -23,6 +24,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 app.use('/api', searchRoutes);
 app.use('/api/scrape', scrapingRoutes);
 app.use('/api/trending', trendingRoutes);
+app.use('/api/pipeline', pipelineRoutes);
 
 // Error handling
 app.use((req, res, next) => {

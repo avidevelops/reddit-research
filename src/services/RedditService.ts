@@ -120,10 +120,14 @@ export class RedditService {
         return RedditDataCleaner.cleanPosts(rawPosts);
     }
 
-    async getPostComments(postId: string, subreddit: string): Promise<CleanRedditComment[]> {
+    async getPostComments(
+        postId: string,
+        subreddit: string,
+        sort: 'best' | 'top' | 'controversial' | 'qa' | 'new' = 'best',
+    ): Promise<CleanRedditComment[]> {
         const token = await this.getAccessToken();
         const response = await fetch(
-            `https://oauth.reddit.com/r/${subreddit}/comments/${postId}.json`,
+            `https://oauth.reddit.com/r/${subreddit}/comments/${postId}.json?sort=${sort}`,
             {
                 headers: new Headers({
                     'Authorization': `Bearer ${token}`,

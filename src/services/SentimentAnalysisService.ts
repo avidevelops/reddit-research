@@ -1,10 +1,12 @@
-import { genAI } from '../config/config';
+import { config, genAI } from '../config/config';
 import { ApiError } from '../middleware/errorMiddleware';
 import { createBatchPrompt } from '../utils/batchProcessor';
 import { CostTracker } from '../utils/costTracker';
+import { extractJson } from '../utils/llmJson';
+import { LMStudioModel } from './LMStudioClient';
 import { Logger } from '../utils/logger';
 
-const defaultModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const defaultModel = genAI.getGenerativeModel({ model: config.model });
 
 // Configure logging
 Logger.configure({
@@ -24,8 +26,14 @@ export class SentimentAnalysisService {
     private static readonly RETRY_DELAY = 1000; // 1 second
 
     // For testing purposes
-    public static setModel(model: any) {
-        this.model = model;
+    public static setModel(model: 'gemini' | 'lmstudio' | any, modelName?: string) {
+        if (model === 'gemini') {
+            this.model = defaultModel;
+        } else if (model === 'lmstudio') {
+            this.model = new LMStudioModel(config.lmStudioUrl, modelName || config.model);
+        } else {
+            this.model = model;
+        }
     }
 
     private static readonly PROMPT_TEMPLATE = `
@@ -71,11 +79,11 @@ export class SentimentAnalysisService {
         try {
             const prompt = this.PROMPT_TEMPLATE.replace('{text}', text);
             const result = await this.model.generateContent(prompt);
-            const response = await result.response;
+            const response = result.response;
             const analysisText = response.text();
 
             try {
-                const analysis = JSON.parse(analysisText);
+                const analysis = extractJson(analysisText);
                 
                 if (!this.validateAnalysis(analysis)) {
                     throw new Error('Invalid analysis format');
@@ -83,7 +91,7 @@ export class SentimentAnalysisService {
 
                 return analysis;
             } catch (error) {
-                Logger.error('Failed to parse Gemini response:', error);
+                Logger.error('Failed to parse LLM response:', error);
 
                 if (retryCount < this.MAX_RETRIES) {
                     await this.delay(this.RETRY_DELAY);
@@ -117,21 +125,13 @@ export class SentimentAnalysisService {
             prompt = createBatchPrompt(posts);
             Logger.debug(`Generated batch prompt for ${posts.length} posts: ${prompt}...`);
             const result = await this.model.generateContent(prompt);
-            const response = await result.response;
+            const response = result.response;
             const responseText = response.text();
             
             try {
-                Logger.debug(`Received response from Gemini: ${responseText}...`);
+                Logger.debug(`Received response from LLM: ${responseText}...`);
                 
-                // Extract JSON from markdown code blocks if present
-                let jsonText = responseText;
-                const match = responseText.match(/```json\n([\s\S]*?)\n```/);
-                if (match) {
-                    jsonText = match[1];
-                    Logger.debug('Extracted JSON from markdown code block');
-                }
-                
-                const analysisResults = JSON.parse(jsonText);
+                const analysisResults = extractJson(responseText) as any[];
                 
                 // Track successful API usage
                 await CostTracker.trackBatchProcessing(
@@ -156,7 +156,7 @@ export class SentimentAnalysisService {
                     'Error: Failed to parse response'
                 );
 
-                Logger.error('Error parsing Gemini response:', error);
+                Logger.error('Error parsing LLM response:', error);
                 throw new ApiError(500, 'Failed to parse sentiment analysis results');
             }
         } catch (error) {

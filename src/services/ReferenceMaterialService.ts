@@ -1,11 +1,13 @@
 import { RedditService } from './RedditService';
 import { Logger } from '../utils/logger';
-import { genAI } from '../config/config';
+import { config, genAI } from '../config/config';
 import { ApiError } from '../middleware/errorMiddleware';
+import { extractJson } from '../utils/llmJson';
+import {CleanRedditComment} from "../utils/redditDataCleaner";
 
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const model = genAI.getGenerativeModel({ model: config.model });
 
-interface PostWithComments {
+export interface PostWithComments {
     id: string;
     title: string;
     author: string;
@@ -14,9 +16,10 @@ interface PostWithComments {
     created_utc: number;
     permalink: string;
     comments: Comment[];
+    commentCategories: CategorizedComments;  // Comments organized by sort type
 }
 
-interface Comment {
+export interface Comment {
     id: string;
     body: string;
     author: string;
@@ -25,7 +28,15 @@ interface Comment {
     replies: Comment[];
 }
 
-interface ReferenceMaterial {
+export interface CategorizedComments {
+    best: CleanRedditComment[];
+    top: CleanRedditComment[];
+    controversial: CleanRedditComment[];
+    qa: CleanRedditComment[];
+    all: CleanRedditComment[];
+}
+
+export interface ReferenceMaterial {
     topicId: string;
     topic: string;
     sourcePosts: PostWithComments[];
@@ -93,19 +104,39 @@ export class ReferenceMaterialService {
                 if (posts.length === 0) continue;
                 
                 const post = posts[0];
+
+                // Fetch comments with different sorts
+                const [bestComments, topComments, controversialComments, qaComments] = await Promise.all([
+                    this.redditService.getPostComments(postId, subreddit, 'best'),
+                    this.redditService.getPostComments(postId, subreddit, 'top'),
+                    this.redditService.getPostComments(postId, subreddit, 'controversial'),
+                    this.redditService.getPostComments(postId, subreddit, 'qa')
+                ]);
+
+                // Combine and categorize comments
+                const categorized = this.categorizeAndDeduplicateComments({
+                    best: bestComments,
+                    top: topComments,
+                    controversial: controversialComments,
+                    qa: qaComments,
+                });
+
+                // Then slice what is needed for the prompt
+                const categorizedComments = {
+                    best: categorized.best.slice(0, 30),
+                    top: categorized.top.slice(0, 20),
+                    controversial: categorized.controversial.slice(0, 15),
+                    qa: categorized.qa.slice(0, 15),
+                    all: categorized.all
+                };
                 
                 // Get comments for the post
                 const comments = await this.redditService.getPostComments(postId, subreddit);
-                
+
                 postsWithComments.push({
-                    id: post.id,
-                    title: post.title,
-                    author: post.author,
-                    selftext: post.selftext || '',
-                    score: post.score,
-                    created_utc: post.created_utc,
-                    permalink: post.permalink,
-                    comments
+                    ...post,
+                    comments: categorizedComments.all,
+                    commentCategories: categorizedComments
                 });
                 
                 Logger.debug(`Fetched post ${postId} with ${comments.length} comments`);
@@ -117,6 +148,36 @@ export class ReferenceMaterialService {
         return postsWithComments;
     }
 
+    // Deduplication and categorization
+    private categorizeAndDeduplicateComments(commentsBySort: {
+        best: Comment[],
+        top: Comment[],
+        controversial: Comment[],
+        qa: Comment[]
+    }): CategorizedComments {
+        const seen = new Set<string>();
+        const categorized: CategorizedComments = {
+            best: [],
+            top: [],
+            controversial: [],
+            qa: [],
+            all: []
+        };
+
+        // Process in priority order (best > top > controversial > qa)
+        for (const [category, comments] of Object.entries(commentsBySort)) {
+            for (const comment of comments) {
+                if (!seen.has(comment.id)) {
+                    seen.add(comment.id);
+                    categorized[category as keyof CategorizedComments].push(comment);
+                    categorized.all.push(comment);
+                }
+            }
+        }
+
+        return categorized;
+    }
+
     private async analyzeContentForReferences(
         topic: string,
         posts: PostWithComments[]
@@ -124,6 +185,18 @@ export class ReferenceMaterialService {
         const prompt = `
         Analyze these Reddit posts and comments about "${topic}" to extract reference material for a Medium article.
         
+        Comments are pre-categorized by Reddit's sorting algorithms:
+        - BEST: Community-validated balanced perspectives (use for key insights)
+        - TOP: Highest-scored popular opinions (use for quotable content)
+        - CONTROVERSIAL: Debated viewpoints with mixed reactions (use for balanced perspectives)
+        - Q&A: Direct questions and answers (use for identifying pain points and solutions)
+        
+        This categorization helps identify:
+        - Expert opinions likely appear in BEST/TOP
+        - Pain points often surface in Q&A
+        - Controversial points are pre-identified
+        - Success stories typically score high (TOP)
+
         Posts and comments data:
         ${JSON.stringify(posts.map(p => ({
             title: p.title,
@@ -177,17 +250,10 @@ export class ReferenceMaterialService {
 
         try {
             const result = await model.generateContent(prompt);
-            const response = await result.response;
+            const response = result.response;
             const analysisText = response.text();
-            
-            // Extract JSON from response
-            let jsonText = analysisText;
-            const match = analysisText.match(/```json\n([\s\S]*?)\n```/);
-            if (match) {
-                jsonText = match[1];
-            }
-            
-            const analysis = JSON.parse(jsonText);
+
+            const analysis = extractJson(analysisText) as Omit<ReferenceMaterial, 'topicId' | 'topic' | 'sourcePosts'>;
             Logger.info(`Extracted reference material for topic: ${topic}`);
             
             return analysis;
