@@ -83,7 +83,11 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
    REDDIT_CLIENT_ID=your_client_id
    REDDIT_CLIENT_SECRET=your_client_secret
    REDDIT_USER_AGENT=GummyRedditClone/1.0.0
+   LLM_PROVIDER=gemini # gemini | lmstudio | claude
+   MODEL=gemini-2.0-flash
    GOOGLE_API_KEY=your_gemini_api_key
+   ANTHROPIC_API_KEY=your_anthropic_api_key
+   LM_STUDIO_URL=http://localhost:1234
    ```
 
 ## Running the Application

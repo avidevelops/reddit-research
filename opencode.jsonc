@@ -1,0 +1,52 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Default model (you can change from inside OpenCode too)
+  "model": "lmstudio/qwen3-coder-30b",
+
+  "provider": {
+    "lmstudio": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LM Studio (local)",
+      "options": {
+        "baseURL": "http://127.0.0.1:1234/v1"
+      },
+      "models": {
+        "qwen/qwen3-coder-30b": {
+          "name": "Qwen3 Coder 30B (local)"
+        },
+        "mistralai/devstral-small-2-2512": {
+          "name": "Devstral Small 2 24B (local)"
+        },
+        "text-embedding-nomic-embed-text-v1.5": {
+          "name": "Nomic Embeddings (local)"
+        },
+        "mistralai/devstral-small-2507": {
+          "name": "Devstral Small 24B (local)"
+        },
+        "openai/gpt-oss-20b": {
+          "name": "GPT-OSS 20B (local)"
+        },
+        "qwen/qwen2.5-coder-32b": {
+          "name": "Qwen2.5 Coder 32B (local)"
+        }
+      }
+    }
+  },
+
+  // Tools: allow code edits and shell for your Reddit project
+  "tools": {
+    "write": true,
+    "edit": true,
+    "bash": true
+  },
+
+  // Optional: agent preset for this repo
+  "agent": {
+    "reddit-research": {
+      "description": "FullStack Developer-style agent for the Reddit Sentiment Analysis Tool",
+      "model": "lmstudio/qwen3-coder-30b",
+      "prompt": "You are an expert fullstack developer working on a Node.js/TypeScript. Follow the repo's README, use MongoDB safely, and keep changes minimal and well-tested. When using the 'read' or 'glob' tools, ALWAYS use relative paths from the current working directory. NEVER use absolute paths or leave the path argument empty."
+    }
+  }
+}

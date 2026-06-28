@@ -1,11 +1,12 @@
-import { genAI } from '../config/config';
+import { config, genAI } from '../config/config';
 import { ApiError } from '../middleware/errorMiddleware';
+import { extractJson } from '../utils/llmJson';
 import { Logger } from '../utils/logger';
 import {CleanRedditPost} from "../utils/redditDataCleaner";
 
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const model = genAI.getGenerativeModel({ model: config.model });
 
-interface TrendingTopic {
+export interface TrendingTopic {
     topic: string;
     category: 'Life' | 'Self-improvement' | 'Work' | 'Technology' | 'Software development' | 'AI-Artificial Intelligence' | 'Society' | 'Culture' | 'World' | 'Finance';
     engagementScore: number;
@@ -26,7 +27,7 @@ interface TrendingTopic {
     }>; // Full post objects that contributed to this topic
 }
 
-interface PostAnalysis {
+export interface PostAnalysis {
     posts: any[];
     trendingTopics: TrendingTopic[];
     overallTheme: string;
@@ -173,18 +174,12 @@ export class TrendingTopicsService {
             const prompt = this.TRENDING_ANALYSIS_PROMPT.replace('{posts}', JSON.stringify(postsData));
             
             const result = await model.generateContent(prompt);
-            const response = await result.response;
+            const response = result.response;
             const analysisText = response.text();
 
             try {
-                // Extract JSON from response
-                let jsonText = analysisText;
-                const match = analysisText.match(/```json\n([\s\S]*?)\n```/);
-                if (match) {
-                    jsonText = match[1];
-                }
-                
-                const analysis = JSON.parse(jsonText);
+                Logger.debug('Raw analysis response:', analysisText);
+                const analysis = extractJson(analysisText) as PostAnalysis;
                 
                 // Enhance trending topics with engagement metrics
                 const enhancedTopics = analysis.trendingTopics.map((topic: TrendingTopic) => ({

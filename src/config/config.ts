@@ -1,14 +1,26 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
+import { ClaudeModel } from '../services/ClaudeClient';
+import { LMStudioModel } from '../services/LMStudioClient';
 
 dotenv.config();
+
+export type LLMProvider = 'gemini' | 'lmstudio' | 'claude';
+
+function getLlmProvider(): LLMProvider {
+    const provider = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
+    return provider === 'lmstudio' || provider === 'claude' ? provider : 'gemini';
+}
+
+const llmProvider = getLlmProvider();
 
 // Validate required environment variables
 const requiredEnvVars = [
     'REDDIT_CLIENT_ID',
     'REDDIT_CLIENT_SECRET',
     'REDDIT_USER_AGENT',
-    'GOOGLE_API_KEY'
+    ...(llmProvider === 'gemini' ? ['GOOGLE_API_KEY'] : []),
+    ...(llmProvider === 'claude' ? ['ANTHROPIC_API_KEY'] : [])
 ] as const;
 
 for (const envVar of requiredEnvVars) {
@@ -29,6 +41,7 @@ export interface LoggingConfig {
 }
 
 interface Config {
+    model: string;
     port: number;
     mongodb: {
         uri: string;
@@ -40,7 +53,17 @@ interface Config {
     };
     gemini: {
         apiKey: string;
+        model: string;
     };
+    claude: {
+        apiKey: string;
+        model: string;
+        baseUrl: string;
+        maxTokens: number;
+    };
+    lmStudioUrl: string;
+    lmStudioModel: string;
+    llmProvider: LLMProvider;
     logging: LoggingConfig;
 }
 
@@ -81,7 +104,30 @@ function getLoggingConfig(): LoggingConfig {
     };
 }
 
+function getModel(): string {
+    if (process.env.MODEL) {
+        return process.env.MODEL;
+    }
+
+    if (llmProvider === 'claude') {
+        return process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
+    }
+
+    if (llmProvider === 'lmstudio') {
+        return process.env.LM_STUDIO_MODEL || 'openai/gpt-oss-20b';
+    }
+
+    return process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+}
+
+const model = getModel();
+
 export const config: Config = {
+    model,
+    lmStudioUrl: process.env.LM_STUDIO_URL || 'http://localhost:1234',
+    lmStudioModel: model,
+    llmProvider,
+
     port: getPort(),
     mongodb: {
         uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/gummy_reddit'
@@ -92,10 +138,31 @@ export const config: Config = {
         userAgent: process.env.REDDIT_USER_AGENT!
     },
     gemini: {
-        apiKey: process.env.GOOGLE_API_KEY!
+        apiKey: process.env.GOOGLE_API_KEY || '',
+        model
+    },
+    claude: {
+        apiKey: process.env.ANTHROPIC_API_KEY || '',
+        model,
+        baseUrl: process.env.CLAUDE_BASE_URL || 'https://api.anthropic.com',
+        maxTokens: parseInt(process.env.CLAUDE_MAX_TOKENS || '8192', 10)
     },
     logging: getLoggingConfig()
 };
 
-// Initialize Gemini with validated API key
-export const genAI = new GoogleGenerativeAI(config.gemini.apiKey);
+export const genAI = (() => {
+    if (config.llmProvider === 'lmstudio') {
+        return new LMStudioModel(config.lmStudioUrl, config.lmStudioModel);
+    }
+
+    if (config.llmProvider === 'claude') {
+        return new ClaudeModel({
+            apiKey: config.claude.apiKey,
+            model: config.claude.model,
+            baseUrl: config.claude.baseUrl,
+            maxTokens: config.claude.maxTokens,
+        });
+    }
+
+    return new GoogleGenerativeAI(config.gemini.apiKey);
+})();

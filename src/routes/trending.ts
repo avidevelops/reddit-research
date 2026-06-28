@@ -1,4 +1,4 @@
-import { Request, Response, Router } from 'express';
+import {NextFunction, Request, Response, Router} from 'express';
 import { TrendingController } from '../controllers/TrendingController';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -311,23 +311,39 @@ import { asyncHandler } from '../utils/asyncHandler';
 const router = Router();
 const trendingController = new TrendingController();
 
-// Single subreddit trending analysis
-router.get('/:subreddit',
-    asyncHandler(async (req: Request, res: Response) => {
-        console.log('Trending request:', req.params.subreddit, req.query);
-        await trendingController.getTrendingTopics(req, res);
-    })
-);
-
-// Multi-subreddit trending analysis
+// Multi-subreddit trending analysis must be registered before /:subreddit.
 router.get('/multi',
     asyncHandler(async (req: Request, res: Response) => {
         await trendingController.getMultiSubredditTrends(req, res);
     })
 );
 
+// Single subreddit trending analysis
+router.get('/:subreddit',
+    (req: Request, res: Response, next: NextFunction) => {
+        req.setTimeout(900000, () => {
+            if (!res.headersSent) {
+                return res.status(504).json({ error: 'Request timeout'});
+            }
+        });
+        next();
+    },
+    asyncHandler(async (req: Request, res: Response) => {
+        console.log('Trending request:', req.params.subreddit, req.query);
+        await trendingController.getTrendingTopics(req, res);
+    })
+);
+
 // Gather reference material for a topic
 router.post('/:subreddit/references',
+    (req: Request, res: Response, next: NextFunction) => {
+        req.setTimeout(900000, () => {
+            if (!res.headersSent) {
+                return res.status(504).json({ error: 'Request timeout'});
+            }
+        });
+        next();
+    },
     asyncHandler(async (req: Request, res: Response) => {
         await trendingController.gatherReferences(req, res);
     })
