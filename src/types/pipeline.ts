@@ -1,6 +1,7 @@
 import { CleanRedditPost } from '../utils/redditDataCleaner';
 
 export type PipelineTimeframe = 'day' | 'week' | 'month';
+export type WritingMode = 'research-report' | 'publish-ready';
 
 export interface PipelineRequest {
     subreddits: string[];
@@ -10,6 +11,10 @@ export interface PipelineRequest {
     targetAudience?: string;
     articleStyle?: string;
     outputDir?: string;
+    theme?: string;
+    writingMode?: WritingMode;
+    selectedOpportunity?: TopicOpportunity;
+    opportunitiesSnapshot?: TopicOpportunity[];
 }
 
 export interface TopicOpportunity {
@@ -32,7 +37,8 @@ export interface TopicOpportunity {
 
 export interface ResearchQuote {
     text: string;
-    author: string;
+    author?: string;
+    voiceLabel?: string;
     context: string;
     relevance: string;
 }
@@ -76,8 +82,22 @@ export interface ArticleBrief {
     }>;
     counterarguments: string[];
     practicalTakeaways: string[];
+    authorStance: string;
     sourceNotes: string[];
     risks: string[];
+}
+
+export interface PipelineRequestSnapshot {
+    subreddits: string[];
+    timeframe: PipelineTimeframe;
+    limit: number;
+    topicsToGather: number;
+    targetAudience: string;
+    articleStyle: string;
+    theme: string;
+    writingMode: WritingMode;
+    outputDir?: string;
+    selectedOpportunityId?: string;
 }
 
 export interface ArticleDraft {
@@ -121,7 +141,7 @@ export interface PipelineArtifacts {
 export interface PipelineRun {
     id: string;
     createdAt: string;
-    request: Required<Omit<PipelineRequest, 'outputDir'>> & { outputDir?: string };
+    request: PipelineRequestSnapshot;
     opportunities: TopicOpportunity[];
     selectedOpportunity: TopicOpportunity;
     researchBundle: ResearchBundle;

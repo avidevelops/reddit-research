@@ -22,6 +22,10 @@ router.post('/run/sync', withLongTimeout, asyncHandler(async (req: Request, res:
     await pipelineController.runPipelineSync(req, res);
 }));
 
+router.post('/opportunities', withLongTimeout, asyncHandler(async (req: Request, res: Response) => {
+    await pipelineController.discoverOpportunities(req, res);
+}));
+
 router.get('/providers', asyncHandler(async (req: Request, res: Response) => {
     await pipelineController.getProviders(req, res);
 }));

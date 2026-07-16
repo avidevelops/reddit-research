@@ -23,7 +23,7 @@ import { asyncHandler } from '../utils/asyncHandler';
  *           type: string
  *         required: true
  *         description: Name of the subreddit to analyze
- *         example: technology
+ *         example: changemyview
  *       - in: query
  *         name: limit
  *         schema:
@@ -103,7 +103,7 @@ import { asyncHandler } from '../utils/asyncHandler';
  *           type: string
  *         required: true
  *         description: Comma-separated list of subreddits
- *         example: technology,programming,artificial
+ *         example: AskReddit,todayilearned,changemyview
  *       - in: query
  *         name: limit
  *         schema:
@@ -150,7 +150,7 @@ import { asyncHandler } from '../utils/asyncHandler';
  *           type: string
  *         required: true
  *         description: Name of the subreddit
- *         example: technology
+ *         example: changemyview
  *     requestBody:
  *       required: true
  *       content:
@@ -164,7 +164,7 @@ import { asyncHandler } from '../utils/asyncHandler';
  *               topic:
  *                 type: string
  *                 description: The topic to gather references for
- *                 example: "AI Ethics in Healthcare"
+ *                 example: "Why people change their minds"
  *               postIds:
  *                 type: array
  *                 items:
@@ -184,10 +184,10 @@ import { asyncHandler } from '../utils/asyncHandler';
  *                   example: true
  *                 topic:
  *                   type: string
- *                   example: "AI Ethics in Healthcare"
+ *                   example: "Why people change their minds"
  *                 subreddit:
  *                   type: string
- *                   example: "technology"
+ *                   example: "changemyview"
  *                 postsAnalyzed:
  *                   type: integer
  *                   description: Number of posts analyzed
@@ -199,7 +199,7 @@ import { asyncHandler } from '../utils/asyncHandler';
  *                 filepath:
  *                   type: string
  *                   description: Path where reference material was saved
- *                   example: "/reference-materials/technology-1234567890-reference.json"
+ *                   example: "/reference-materials/changemyview-1234567890-reference.json"
  *                 summary:
  *                   type: object
  *                   properties:
@@ -220,7 +220,7 @@ import { asyncHandler } from '../utils/asyncHandler';
  *                   properties:
  *                     topicId:
  *                       type: string
- *                       example: "technology-1234567890"
+ *                       example: "changemyview-1234567890"
  *                     topic:
  *                       type: string
  *                     sourcePosts:

@@ -42,6 +42,7 @@ import { useState } from 'react';
 import { FiBookOpen, FiCheckCircle, FiEdit3, FiFileText, FiFolder, FiSearch, FiTrendingUp } from 'react-icons/fi';
 import { runStoryPipeline } from '../services/api';
 import type { PipelineRequest, PipelineRun } from '../types/api';
+import { getThemePreset } from './pipeline/pipelineOptions';
 
 const stageLabels = ['Discover', 'Score', 'Research', 'Brief', 'Draft', 'Edit', 'Export'];
 
@@ -89,12 +90,13 @@ const MarkdownPreview = ({ markdown }: { markdown: string }) => (
 );
 
 const TrendingTopics = () => {
-    const [subreddits, setSubreddits] = useState('technology,programming,artificial');
+    const defaultPreset = getThemePreset('General interest');
+    const [subreddits, setSubreddits] = useState(defaultPreset?.subreddits || 'AskReddit,todayilearned,changemyview');
     const [timeframe, setTimeframe] = useState<PipelineRequest['timeframe']>('week');
     const [limit, setLimit] = useState(40);
     const [topicsToGather, setTopicsToGather] = useState(3);
-    const [targetAudience, setTargetAudience] = useState('curious Medium readers interested in technology, work, and practical life lessons');
-    const [articleStyle, setArticleStyle] = useState('sharp narrative essay with practical takeaways and source-backed insight');
+    const [targetAudience, setTargetAudience] = useState(defaultPreset?.targetAudience || 'curious Medium readers interested in thoughtful, practical insight');
+    const [articleStyle, setArticleStyle] = useState(defaultPreset?.articleStyle || 'sharp narrative essay with practical takeaways and source-backed insight');
     const [outputDir, setOutputDir] = useState('story-outputs');
     const toast = useToast();
 
@@ -171,7 +173,7 @@ const TrendingTopics = () => {
                             <Input
                                 value={subreddits}
                                 onChange={(event) => setSubreddits(event.target.value)}
-                                placeholder="technology, programming, artificial"
+                                placeholder="AskReddit, todayilearned, changemyview"
                             />
                         </Box>
                         <Box>
@@ -323,9 +325,9 @@ const TrendingTopics = () => {
                                     <CardBody>
                                         <VStack align="stretch" spacing={3}>
                                             {run.researchBundle.quotes.slice(0, 6).map((quote, index) => (
-                                                <Box key={`${quote.author}-${index}`}>
+                                                <Box key={`${quote.voiceLabel || quote.author || 'quote'}-${index}`}>
                                                     <Text fontSize="sm">"{quote.text}"</Text>
-                                                    <Text fontSize="xs" color="gray.500">u/{quote.author} - {quote.relevance}</Text>
+                                                    <Text fontSize="xs" color="gray.500">{quote.voiceLabel || quote.author || 'anonymous voice'} - {quote.relevance}</Text>
                                                 </Box>
                                             ))}
                                         </VStack>

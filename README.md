@@ -127,9 +127,9 @@ Example queries:
 
 ```
 Pain & Anger related post in r/NorthKorea
-Positive reviews about Tesla in r/cars
-Frustration about iPhone battery in r/Apple
-Negative feedback about ChatGPT in r/artificial
+Positive experiences with meditation in r/Meditation
+Frustration about career advice in r/careerguidance
+Debates about personal finance habits in r/personalfinance
 Happy moments in r/wholesome
 ```
 

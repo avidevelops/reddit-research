@@ -1,12 +1,13 @@
 import { randomUUID } from 'crypto';
 import { ApiError } from '../middleware/errorMiddleware';
-import { ArticleBrief, ArticleDraft, EditorialReview, PipelineProgressCallback, PipelineRequest, PipelineRun, PipelineTimeframe, ResearchBundle, TopicOpportunity } from '../types/pipeline';
+import { ArticleBrief, ArticleDraft, EditorialReview, PipelineProgressCallback, PipelineRequest, PipelineRequestSnapshot, PipelineRun, PipelineTimeframe, ResearchBundle, TopicOpportunity, WritingMode } from '../types/pipeline';
 import { CleanRedditPost } from '../utils/redditDataCleaner';
 import { isArticleBrief, isArticleDraft, isEditorialReview } from '../utils/pipelineValidators';
 import { Logger } from '../utils/logger';
 import { ArtifactStorageService } from './ArtifactStorageService';
 import { ArticleQualityService } from './ArticleQualityService';
 import { LLMService } from './LLMService';
+import { buildBriefPrompt, buildDraftPrompt, buildEditPrompt, toPromptContext } from './pipelinePrompts';
 import { RedditService } from './RedditService';
 import { ReferenceMaterial, ReferenceMaterialService } from './ReferenceMaterialService';
 import { PostAnalysis, TrendingTopic, TrendingTopicsService } from './TrendingTopicsService';
@@ -18,7 +19,11 @@ interface NormalizedPipelineRequest {
     topicsToGather: number;
     targetAudience: string;
     articleStyle: string;
+    theme: string;
+    writingMode: WritingMode;
     outputDir?: string;
+    selectedOpportunity?: TopicOpportunity;
+    opportunitiesSnapshot?: TopicOpportunity[];
 }
 
 interface SubredditAnalysis {
@@ -41,18 +46,32 @@ export class ArticlePipelineService {
 
     async runPipeline(request: PipelineRequest, onProgress?: PipelineProgressCallback): Promise<PipelineRun> {
         const normalized = this.normalizeRequest(request);
-        onProgress?.('stage', { stage: 'discovering', subreddits: normalized.subreddits });
-        const analyses = await this.discoverAndAnalyze(normalized);
-        const opportunities = this.buildOpportunities(analyses);
-        const selectedOpportunity = opportunities[0];
+        let opportunities: TopicOpportunity[];
+        let selectedOpportunity: TopicOpportunity | undefined;
+
+        if (normalized.selectedOpportunity) {
+            selectedOpportunity = normalized.selectedOpportunity;
+            opportunities = this.withSelectedOpportunity(
+                normalized.opportunitiesSnapshot?.length ? normalized.opportunitiesSnapshot : [selectedOpportunity],
+                selectedOpportunity
+            );
+            onProgress?.('stage', {
+                stage: 'opportunities',
+                count: opportunities.length,
+                topTopic: selectedOpportunity.topic,
+                selected: true,
+            });
+        } else {
+            opportunities = await this.discoverOpportunities(normalized, onProgress);
+            selectedOpportunity = opportunities[0];
+        }
 
         if (!selectedOpportunity) {
             throw new ApiError(404, 'No viable story opportunities found');
         }
 
-        onProgress?.('stage', { stage: 'opportunities', count: opportunities.length, topTopic: selectedOpportunity.topic });
         onProgress?.('stage', { stage: 'researching', topic: selectedOpportunity.topic });
-        const researchBundle = await this.gatherResearchBundle(selectedOpportunity, normalized.topicsToGather);
+        const researchBundle = await this.gatherResearchBundle(selectedOpportunity, normalized);
         onProgress?.('stage', { stage: 'briefing' });
         const articleBrief = await this.generateBrief(researchBundle, normalized);
         onProgress?.('stage', { stage: 'drafting', wordEstimate: selectedOpportunity.estimatedReadTime * 220 });
@@ -63,7 +82,7 @@ export class ArticlePipelineService {
         const runBase: Omit<PipelineRun, 'artifacts'> = {
             id: randomUUID(),
             createdAt: new Date().toISOString(),
-            request: normalized,
+            request: this.toRequestSnapshot(normalized, selectedOpportunity),
             opportunities,
             selectedOpportunity,
             researchBundle,
@@ -96,78 +115,36 @@ export class ArticlePipelineService {
         return run;
     }
 
+    async discoverOpportunities(
+        request: PipelineRequest,
+        onProgress?: PipelineProgressCallback
+    ): Promise<TopicOpportunity[]> {
+        const normalized = this.normalizeRequest(request);
+        onProgress?.('stage', { stage: 'discovering', subreddits: normalized.subreddits, theme: normalized.theme });
+        const analyses = await this.discoverAndAnalyze(normalized);
+        const opportunities = this.buildOpportunities(analyses);
+        onProgress?.('stage', {
+            stage: 'opportunities',
+            count: opportunities.length,
+            topTopic: opportunities[0]?.topic,
+        });
+        return opportunities;
+    }
+
     async generateBrief(
         researchBundle: ResearchBundle,
-        request: Pick<NormalizedPipelineRequest, 'targetAudience' | 'articleStyle'>
+        request: Pick<NormalizedPipelineRequest, 'targetAudience' | 'articleStyle' | 'theme' | 'writingMode'>
     ): Promise<ArticleBrief> {
-        const prompt = `
-You are an expert Medium editor. Create a rigorous article brief from this Reddit research bundle.
-
-Rules:
-- Use only the provided research.
-- Do not invent statistics, quotes, or source claims.
-- Keep Reddit quotes attributed and source-aware.
-- Optimize for a strong, original Medium story, not a generic summary.
-
-Target audience: ${request.targetAudience}
-Article style: ${request.articleStyle}
-
-Research bundle:
-${JSON.stringify(researchBundle, null, 2)}
-
-Return strict JSON:
-{
-  "title": "working title",
-  "headlineOptions": ["headline 1", "headline 2", "headline 3"],
-  "hookOptions": ["hook 1", "hook 2"],
-  "thesis": "clear thesis",
-  "targetAudience": "specific audience",
-  "promise": "what reader gets",
-  "outline": [
-    {"heading": "section heading", "purpose": "why this section exists", "evidence": ["source-backed evidence"]}
-  ],
-  "counterarguments": ["balanced counterpoint"],
-  "practicalTakeaways": ["takeaway"],
-  "sourceNotes": ["source note with Reddit link context"],
-  "risks": ["claim or framing risk to avoid"]
-}`;
-
+        const prompt = buildBriefPrompt(researchBundle, toPromptContext(request));
         return LLMService.generateJson(prompt, isArticleBrief, 'article brief generation');
     }
 
     async generateDraft(
         brief: ArticleBrief,
         researchBundle: ResearchBundle,
-        request: Pick<NormalizedPipelineRequest, 'targetAudience' | 'articleStyle'>
+        request: Pick<NormalizedPipelineRequest, 'targetAudience' | 'articleStyle' | 'theme' | 'writingMode'>
     ): Promise<ArticleDraft> {
-        const prompt = `
-Write a polished Medium-style Markdown draft from this brief and Reddit research.
-
-Rules:
-- Output strict JSON only.
-- The markdown must be the complete article.
-- Do not fabricate quotes, studies, metrics, or external facts.
-- Use source-backed claims and include a "Sources" section with Reddit links.
-- Include a strong hook, clear thesis, useful sections, counterpoints, and practical takeaways.
-- No Medium publishing, only Markdown.
-
-Target audience: ${request.targetAudience}
-Article style: ${request.articleStyle}
-
-Brief:
-${JSON.stringify(brief, null, 2)}
-
-Research:
-${JSON.stringify(researchBundle, null, 2)}
-
-Return strict JSON:
-{
-  "title": "final title",
-  "markdown": "# Title\\n\\nFull article in Markdown...",
-  "sourceLinks": ["https://reddit.com/..."],
-  "estimatedReadTime": 8
-}`;
-
+        const prompt = buildDraftPrompt(brief, researchBundle, toPromptContext(request));
         return LLMService.generateJson(prompt, isArticleDraft, 'article draft generation');
     }
 
@@ -175,39 +152,9 @@ Return strict JSON:
         draft: ArticleDraft,
         brief: ArticleBrief,
         researchBundle: ResearchBundle,
-        request: Pick<NormalizedPipelineRequest, 'targetAudience' | 'articleStyle'>
+        request: Pick<NormalizedPipelineRequest, 'targetAudience' | 'articleStyle' | 'theme' | 'writingMode'>
     ): Promise<EditorialReview> {
-        const prompt = `
-Act as a demanding Medium editor. Improve this Markdown article while preserving source integrity.
-
-Rules:
-- Return strict JSON only.
-- Make the article clearer, more original, more credible, and more readable.
-- Do not add unsupported claims, fake statistics, or fake quotes.
-- Preserve or improve the Markdown structure.
-- Keep Reddit source links in the article.
-
-Target audience: ${request.targetAudience}
-Article style: ${request.articleStyle}
-
-Brief:
-${JSON.stringify(brief, null, 2)}
-
-Research:
-${JSON.stringify(researchBundle, null, 2)}
-
-Draft:
-${draft.markdown}
-
-Return strict JSON:
-{
-  "score": 0-100,
-  "strengths": ["strength"],
-  "improvements": ["improvement made"],
-  "factCheckNotes": ["source or claim note"],
-  "finalMarkdown": "# Improved Title\\n\\nImproved article..."
-}`;
-
+        const prompt =  buildEditPrompt(draft, brief, researchBundle, toPromptContext(request));
         return LLMService.generateJson(prompt, isEditorialReview, 'editorial review');
     }
 
@@ -252,22 +199,32 @@ ${run.editorialReview.finalMarkdown}`;
     }
 
     private normalizeRequest(request: PipelineRequest): NormalizedPipelineRequest {
-        const subreddits = request.subreddits
+        const requestedSubreddits = request.subreddits || [];
+        const subreddits = requestedSubreddits
             .map(subreddit => subreddit.trim().replace(/^r\//i, ''))
             .filter(Boolean);
+        if (subreddits.length === 0 && request.selectedOpportunity?.sourceSubreddit) {
+            subreddits.push(request.selectedOpportunity.sourceSubreddit);
+        }
 
         if (subreddits.length === 0) {
             throw new ApiError(400, 'At least one subreddit is required');
         }
+
+        const writingMode = this.normalizeWritingMode(request.writingMode);
 
         return {
             subreddits,
             timeframe: request.timeframe || 'week',
             limit: Math.min(Math.max(request.limit || 40, 10), 100),
             topicsToGather: Math.min(Math.max(request.topicsToGather || 3, 1), 5),
-            targetAudience: request.targetAudience?.trim() || 'curious Medium readers interested in technology, work, and life insights',
+            targetAudience: request.targetAudience?.trim() || 'curious Medium readers interested in thoughtful, practical insight',
             articleStyle: request.articleStyle?.trim() || 'insightful narrative essay with practical takeaways',
+            theme: request.theme?.trim() || 'General interest',
+            writingMode,
             outputDir: request.outputDir?.trim() || undefined,
+            selectedOpportunity: request.selectedOpportunity,
+            opportunitiesSnapshot: request.opportunitiesSnapshot,
         };
     }
 
@@ -283,7 +240,7 @@ ${run.editorialReview.finalMarkdown}`;
                     Logger.warn(`No recent posts found for r/${subreddit}`);
                     continue;
                 }
-                const analysis = await TrendingTopicsService.analyzeTrendingTopics(recentPosts);
+                const analysis = await TrendingTopicsService.analyzeTrendingTopics(recentPosts, { theme: request.theme });
                 results.push({ subreddit, posts: recentPosts, analysis });
             } catch (error) {
                 Logger.error(`Failed to analyze r/${subreddit}`, error);
@@ -343,12 +300,13 @@ ${run.editorialReview.finalMarkdown}`;
         };
     }
 
-    private async gatherResearchBundle(opportunity: TopicOpportunity, referenceDepth: number): Promise<ResearchBundle> {
-        const postIds = opportunity.relevantPosts.slice(0, referenceDepth + 2).map(post => post.id);
+    private async gatherResearchBundle(opportunity: TopicOpportunity, request: Pick<NormalizedPipelineRequest, 'topicsToGather' | 'theme' | 'writingMode'>): Promise<ResearchBundle> {
+        const postIds = opportunity.relevantPosts.slice(0, request.topicsToGather + 2).map(post => post.id);
         const material = await this.referenceMaterialService.gatherReferenceMaterial(
             opportunity.topic,
             postIds,
-            opportunity.sourceSubreddit
+            opportunity.sourceSubreddit,
+            { theme: request.theme, writingMode: request.writingMode }
         );
         return this.toResearchBundle(opportunity, material);
     }
@@ -359,7 +317,10 @@ ${run.editorialReview.finalMarkdown}`;
             sourceSubreddit: opportunity.sourceSubreddit,
             opportunity,
             keyInsights: material.keyInsights,
-            quotes: material.quotableComments,
+            quotes: material.quotableComments.map(comment => ({
+                ...comment,
+                voiceLabel: comment.voiceLabel || comment.author || 'anonymous voice',
+            })),
             painPoints: material.commonPainPoints,
             successStories: material.successStories,
             controversialPoints: material.controversialPoints,
@@ -379,5 +340,32 @@ ${run.editorialReview.finalMarkdown}`;
     private getCutoffTimestamp(timeframe: PipelineTimeframe): number {
         const days = timeframe === 'day' ? 1 : timeframe === 'week' ? 7 : 30;
         return Date.now() / 1000 - days * 24 * 60 * 60;
+    }
+
+    private normalizeWritingMode(mode?: WritingMode): WritingMode {
+        if (mode === 'publish-ready' || mode === 'research-report') {
+            return mode;
+        }
+        return 'research-report';
+    }
+
+    private withSelectedOpportunity(opportunities: TopicOpportunity[], selected: TopicOpportunity): TopicOpportunity[] {
+        const withoutDuplicate = opportunities.filter(opportunity => opportunity.id !== selected.id);
+        return [selected, ...withoutDuplicate].sort((a, b) => b.score - a.score);
+    }
+
+    private toRequestSnapshot(request: NormalizedPipelineRequest, selectedOpportunity: TopicOpportunity): PipelineRequestSnapshot {
+        return {
+            subreddits: request.subreddits,
+            timeframe: request.timeframe,
+            limit: request.limit,
+            topicsToGather: request.topicsToGather,
+            targetAudience: request.targetAudience,
+            articleStyle: request.articleStyle,
+            theme: request.theme,
+            writingMode: request.writingMode,
+            outputDir: request.outputDir,
+            selectedOpportunityId: selectedOpportunity.id,
+        };
     }
 }

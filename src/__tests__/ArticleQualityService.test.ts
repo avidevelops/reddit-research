@@ -109,6 +109,8 @@ describe('ArticleQualityService', () => {
                 topicsToGather: 3,
                 targetAudience: 'Developers',
                 articleStyle: 'narrative essay',
+                theme: 'Technology',
+                writingMode: 'research-report',
             },
             opportunities: [],
             selectedOpportunity: {

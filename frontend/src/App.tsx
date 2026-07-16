@@ -2,6 +2,7 @@ import { Box, Button, Container, Flex, Heading, HStack, useColorModeValue } from
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Link as RouterLink, Route, Routes } from 'react-router-dom'
 import './App.css'
+import OpportunityExplorer from './components/pipeline/OpportunityExplorer'
 import PipelineLauncher from './components/pipeline/PipelineLauncher'
 import RunDetail from './components/pipeline/RunDetail'
 import RunHistory from './components/pipeline/RunHistory'
@@ -18,7 +19,8 @@ function App() {
               <Flex justify="space-between" align="center">
                 <Heading size="md">Reddit Research Pipeline</Heading>
                 <HStack>
-                  <Button as={RouterLink} to="/" variant="ghost">Launcher</Button>
+                  <Button as={RouterLink} to="/" variant="ghost">Lucky</Button>
+                  <Button as={RouterLink} to="/opportunities" variant="ghost">Opportunities</Button>
                   <Button as={RouterLink} to="/runs" variant="ghost">Runs</Button>
                 </HStack>
               </Flex>
@@ -27,6 +29,7 @@ function App() {
           <Container maxW="8xl" py={8}>
             <Routes>
               <Route path="/" element={<PipelineLauncher />} />
+              <Route path="/opportunities" element={<OpportunityExplorer />} />
               <Route path="/runs" element={<RunHistory />} />
               <Route path="/runs/:runId" element={<RunDetail />} />
             </Routes>

@@ -42,6 +42,16 @@ export class PipelineController {
         }
     }
 
+    async discoverOpportunities(req: Request, res: Response): Promise<void> {
+        try {
+            const opportunities = await this.pipelineService.discoverOpportunities(req.body);
+            res.json({ opportunities });
+        } catch (error) {
+            Logger.error('Opportunity discovery failed', error);
+            throw error;
+        }
+    }
+
     async listRuns(req: Request, res: Response): Promise<void> {
         const runs = await ArtifactStorageService.listRuns(req.query.outputDir?.toString());
         res.json({ runs });
@@ -102,7 +112,7 @@ export class PipelineController {
 
     async generateBrief(req: Request, res: Response): Promise<void> {
         try {
-            const { researchBundle, targetAudience, articleStyle } = req.body;
+            const { researchBundle, targetAudience, articleStyle, theme, writingMode } = req.body;
             if (!researchBundle) {
                 res.status(400).json({ error: 'researchBundle is required' });
                 return;
@@ -110,6 +120,8 @@ export class PipelineController {
             const brief = await this.pipelineService.generateBrief(researchBundle, {
                 targetAudience: targetAudience || 'curious Medium readers',
                 articleStyle: articleStyle || 'insightful narrative essay',
+                theme: theme || 'General interest',
+                writingMode: writingMode || 'research-report',
             });
             res.json({ brief });
         } catch (error) {
@@ -120,7 +132,7 @@ export class PipelineController {
 
     async generateDraft(req: Request, res: Response): Promise<void> {
         try {
-            const { brief, researchBundle, targetAudience, articleStyle } = req.body;
+            const { brief, researchBundle, targetAudience, articleStyle, theme, writingMode } = req.body;
             if (!brief || !researchBundle) {
                 res.status(400).json({ error: 'brief and researchBundle are required' });
                 return;
@@ -128,6 +140,8 @@ export class PipelineController {
             const draft = await this.pipelineService.generateDraft(brief, researchBundle, {
                 targetAudience: targetAudience || 'curious Medium readers',
                 articleStyle: articleStyle || 'insightful narrative essay',
+                theme: theme || 'General interest',
+                writingMode: writingMode || 'research-report',
             });
             res.json({ draft });
         } catch (error) {
@@ -138,7 +152,7 @@ export class PipelineController {
 
     async editDraft(req: Request, res: Response): Promise<void> {
         try {
-            const { draft, brief, researchBundle, targetAudience, articleStyle } = req.body;
+            const { draft, brief, researchBundle, targetAudience, articleStyle, theme, writingMode } = req.body;
             if (!draft || !brief || !researchBundle) {
                 res.status(400).json({ error: 'draft, brief, and researchBundle are required' });
                 return;
@@ -146,6 +160,8 @@ export class PipelineController {
             const editorialReview = await this.pipelineService.editDraft(draft, brief, researchBundle, {
                 targetAudience: targetAudience || 'curious Medium readers',
                 articleStyle: articleStyle || 'insightful narrative essay',
+                theme: theme || 'General interest',
+                writingMode: writingMode || 'research-report',
             });
             res.json({ editorialReview });
         } catch (error) {

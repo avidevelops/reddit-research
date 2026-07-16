@@ -28,7 +28,8 @@ import { FiDownload, FiEye, FiPlay, FiZap } from 'react-icons/fi';
 import { Link as RouterLink } from 'react-router-dom';
 import { getPipelineExportUrl, getPipelineProviders, streamStoryPipeline } from '../../services/api';
 import { usePipelineStore } from '../../store/pipelineStore';
-import type { PipelineRequest, PipelineRun, PipelineStageEvent } from '../../types/api';
+import type { PipelineRequest, PipelineRun, PipelineStageEvent, WritingMode } from '../../types/api';
+import { getThemePreset, themeOptions, writingModeOptions } from './pipelineOptions';
 import { scoreColor, stageLabel, stageOrder } from './viewUtils';
 
 const splitSubreddits = (value: string): string[] =>
@@ -41,10 +42,15 @@ const isStageEvent = (value: unknown): value is PipelineStageEvent =>
     typeof value === 'object' && value !== null && typeof (value as PipelineStageEvent).stage === 'string';
 
 const PipelineLauncher = () => {
-    const [subreddits, setSubreddits] = useState('technology,programming,artificial');
+    const defaultPreset = getThemePreset('General interest');
+    const [subreddits, setSubreddits] = useState(defaultPreset?.subreddits || '');
     const [timeframe, setTimeframe] = useState<PipelineRequest['timeframe']>('week');
-    const [articleStyle, setArticleStyle] = useState('narrative essay');
-    const [targetAudience, setTargetAudience] = useState('curious Medium readers interested in technology and practical insight');
+    const [articleStyle, setArticleStyle] = useState(defaultPreset?.articleStyle || 'insightful narrative essay with practical takeaways');
+    const [targetAudience, setTargetAudience] = useState(defaultPreset?.targetAudience || 'curious Medium readers interested in thoughtful, practical insight');
+    const [theme, setTheme] = useState('General interest');
+    const [customTheme, setCustomTheme] = useState('');
+    const [writingMode, setWritingMode] = useState<WritingMode>('research-report');
+    const [outputDir, setOutputDir] = useState('story-outputs');
     const [limit, setLimit] = useState(40);
     const [topicsToGather, setTopicsToGather] = useState(3);
     const toast = useToast();
@@ -72,6 +78,16 @@ const PipelineLauncher = () => {
         }
     }, [providersQuery.data, setProviders]);
 
+    const applyTheme = (nextTheme: string) => {
+        setTheme(nextTheme);
+        if (nextTheme === 'Custom') return;
+        const preset = getThemePreset(nextTheme);
+        if (!preset) return;
+        setSubreddits(preset.subreddits);
+        setTargetAudience(preset.targetAudience);
+        setArticleStyle(preset.articleStyle);
+    };
+
     const runPipeline = async () => {
         const parsedSubreddits = splitSubreddits(subreddits);
         if (parsedSubreddits.length === 0) {
@@ -79,6 +95,7 @@ const PipelineLauncher = () => {
             return;
         }
 
+        const resolvedTheme = theme === 'Custom' ? customTheme.trim() || 'General interest' : theme;
         startRun();
         try {
             await streamStoryPipeline({
@@ -86,6 +103,9 @@ const PipelineLauncher = () => {
                 timeframe,
                 articleStyle,
                 targetAudience,
+                theme: resolvedTheme,
+                writingMode,
+                outputDir: outputDir.trim() || undefined,
                 limit,
                 topicsToGather,
             }, ({ event, data }) => {
@@ -112,8 +132,8 @@ const PipelineLauncher = () => {
         <VStack spacing={6} align="stretch">
             <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={4} direction={{ base: 'column', md: 'row' }}>
                 <Box>
-                    <Heading size="xl">Story Pipeline</Heading>
-                    <Text color="gray.500">Research Reddit, score ideas, draft, edit, and save Markdown stories.</Text>
+                    <Heading size="xl">Lucky Run</Heading>
+                    <Text color="gray.500">Let the pipeline pick the best opportunity, draft, edit, and save Markdown artifacts.</Text>
                 </Box>
                 <HStack>
                     {providers && (
@@ -121,9 +141,8 @@ const PipelineLauncher = () => {
                             {providers.activeProvider} / {providers.model}
                         </Badge>
                     )}
-                    <Button as={RouterLink} to="/runs" variant="outline">Runs</Button>
                     <Button leftIcon={<Icon as={FiPlay} />} colorScheme="blue" onClick={runPipeline} isLoading={isRunning}>
-                        Run Pipeline
+                        Start pipeline
                     </Button>
                 </HStack>
             </Flex>
@@ -153,6 +172,24 @@ const PipelineLauncher = () => {
                             </Select>
                         </FormControl>
                         <FormControl>
+                            <FormLabel>Theme</FormLabel>
+                            <Select value={theme} onChange={(event) => applyTheme(event.target.value)}>
+                                {themeOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                            </Select>
+                        </FormControl>
+                        {theme === 'Custom' && (
+                            <FormControl>
+                                <FormLabel>Custom Theme</FormLabel>
+                                <Input value={customTheme} onChange={(event) => setCustomTheme(event.target.value)} />
+                            </FormControl>
+                        )}
+                        <FormControl>
+                            <FormLabel>Writing Mode</FormLabel>
+                            <Select value={writingMode} onChange={(event) => setWritingMode(event.target.value as WritingMode)}>
+                                {writingModeOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </Select>
+                        </FormControl>
+                        <FormControl>
                             <FormLabel>Target Audience</FormLabel>
                             <Input value={targetAudience} onChange={(event) => setTargetAudience(event.target.value)} />
                         </FormControl>
@@ -163,6 +200,10 @@ const PipelineLauncher = () => {
                         <FormControl>
                             <FormLabel>Reference Depth</FormLabel>
                             <Input type="number" value={topicsToGather} min={1} max={5} onChange={(event) => setTopicsToGather(Number(event.target.value))} />
+                        </FormControl>
+                        <FormControl>
+                            <FormLabel>Output Directory</FormLabel>
+                            <Input value={outputDir} onChange={(event) => setOutputDir(event.target.value)} />
                         </FormControl>
                     </SimpleGrid>
                 </CardBody>

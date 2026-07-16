@@ -49,6 +49,7 @@ export interface PostAnalysis {
 export class TrendingTopicsService {
     private static readonly TRENDING_ANALYSIS_PROMPT = `
     Analyze these Reddit posts to identify trending topics worth writing about on Medium.
+    Theme focus: {theme}
     
     Posts data:
     {posts}
@@ -68,12 +69,8 @@ export class TrendingTopicsService {
     - The single best story opportunity with title, angle, and why it will succeed
     - For each topic, include the actual posts (max 5) that contributed to it
     
-    Consider Medium's audience preferences:
-    - Personal growth and self-improvement stories
-    - Tech insights and tutorials
-    - Life lessons and experiences
-    - Career advice and workplace insights
-    - Social commentary and cultural observations
+    Consider the selected theme first. Adapt scoring, story angles, and target audience to the theme instead of assuming any single domain.
+    Useful Medium patterns include personal growth, thoughtful essays, practical analysis, career/work lessons, tutorials when relevant, and cultural commentary.
     
     Return as JSON:
     {
@@ -151,7 +148,7 @@ export class TrendingTopicsService {
         };
     }
 
-    static async analyzeTrendingTopics(posts: CleanRedditPost[]): Promise<PostAnalysis> {
+    static async analyzeTrendingTopics(posts: CleanRedditPost[], options: { theme?: string } = {}): Promise<PostAnalysis> {
         if (!posts || posts.length === 0) {
             throw new ApiError(400, 'No posts to analyze');
         }
@@ -171,7 +168,9 @@ export class TrendingTopicsService {
                 url: `https://reddit.com${post.permalink}`
             }));
 
-            const prompt = this.TRENDING_ANALYSIS_PROMPT.replace('{posts}', JSON.stringify(postsData));
+            const prompt = this.TRENDING_ANALYSIS_PROMPT
+                .replace('{theme}', options.theme || 'General interest')
+                .replace('{posts}', JSON.stringify(postsData));
             
             const result = await model.generateContent(prompt);
             const response = result.response;

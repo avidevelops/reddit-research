@@ -32,6 +32,8 @@ export interface TrendingTopic {
     relevantPosts?: RedditPost[];
 }
 
+export type WritingMode = 'research-report' | 'publish-ready';
+
 export interface ReferenceMaterial {
     topicId: string;
     topic: string;
@@ -39,7 +41,8 @@ export interface ReferenceMaterial {
     keyInsights: string[];
     quotableComments: Array<{
         text: string;
-        author: string;
+        author?: string;
+        voiceLabel?: string;
         context: string;
         relevance: string;
     }>;
@@ -112,7 +115,8 @@ export interface ResearchBundle {
     keyInsights: string[];
     quotes: Array<{
         text: string;
-        author: string;
+        author?: string;
+        voiceLabel?: string;
         context: string;
         relevance: string;
     }>;
@@ -149,6 +153,7 @@ export interface ArticleBrief {
     }>;
     counterarguments: string[];
     practicalTakeaways: string[];
+    authorStance: string;
     sourceNotes: string[];
     risks: string[];
 }
@@ -199,12 +204,27 @@ export interface PipelineRequest {
     targetAudience?: string;
     articleStyle?: string;
     outputDir?: string;
+    theme?: string;
+    writingMode?: WritingMode;
+    selectedOpportunity?: TopicOpportunity;
+    opportunitiesSnapshot?: TopicOpportunity[];
 }
 
 export interface PipelineRun {
     id: string;
     createdAt: string;
-    request: Required<Omit<PipelineRequest, 'outputDir'>> & { outputDir?: string };
+    request: {
+        subreddits: string[];
+        timeframe: 'day' | 'week' | 'month';
+        limit: number;
+        topicsToGather: number;
+        targetAudience: string;
+        articleStyle: string;
+        theme: string;
+        writingMode: WritingMode;
+        outputDir?: string;
+        selectedOpportunityId?: string;
+    };
     opportunities: TopicOpportunity[];
     selectedOpportunity: TopicOpportunity;
     researchBundle: ResearchBundle;
@@ -212,6 +232,10 @@ export interface PipelineRun {
     draft: ArticleDraft;
     editorialReview: EditorialReview;
     artifacts: PipelineArtifacts;
+}
+
+export interface PipelineOpportunitiesResponse {
+    opportunities: TopicOpportunity[];
 }
 
 export interface PipelineRunMetadata {

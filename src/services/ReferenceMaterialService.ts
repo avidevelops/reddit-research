@@ -3,7 +3,8 @@ import { Logger } from '../utils/logger';
 import { config, genAI } from '../config/config';
 import { ApiError } from '../middleware/errorMiddleware';
 import { extractJson } from '../utils/llmJson';
-import {CleanRedditComment} from "../utils/redditDataCleaner";
+import { CleanRedditComment } from "../utils/redditDataCleaner";
+import { WritingMode } from '../types/pipeline';
 
 const model = genAI.getGenerativeModel({ model: config.model });
 
@@ -43,7 +44,8 @@ export interface ReferenceMaterial {
     keyInsights: string[];
     quotableComments: Array<{
         text: string;
-        author: string;
+        author?: string;
+        voiceLabel?: string;
         context: string;
         relevance: string;
     }>;
@@ -73,7 +75,8 @@ export class ReferenceMaterialService {
     async gatherReferenceMaterial(
         topic: string,
         postIds: string[],
-        subreddit: string
+        subreddit: string,
+        options: { theme?: string; writingMode?: WritingMode } = {}
     ): Promise<ReferenceMaterial> {
         Logger.info(`Gathering reference material for topic: ${topic}`);
         
@@ -81,7 +84,7 @@ export class ReferenceMaterialService {
         const postsWithComments = await this.fetchPostsWithComments(postIds, subreddit);
         
         // Analyze the content for reference material
-        const analysis = await this.analyzeContentForReferences(topic, postsWithComments);
+        const analysis = await this.analyzeContentForReferences(topic, postsWithComments, options);
         
         return {
             topicId: `${subreddit}-${Date.now()}`,
@@ -180,10 +183,75 @@ export class ReferenceMaterialService {
 
     private async analyzeContentForReferences(
         topic: string,
-        posts: PostWithComments[]
+        posts: PostWithComments[],
+        options: { theme?: string; writingMode?: WritingMode } = {}
     ): Promise<Omit<ReferenceMaterial, 'topicId' | 'topic' | 'sourcePosts'>> {
-        const prompt = `
+        const theme = options.theme || 'General interest';
+        const writingMode = options.writingMode || 'research-report';
+        const discussionData = JSON.stringify(posts.map(p => ({
+            title: p.title,
+            content: p.selftext,
+            topComments: p.comments.slice(0, 10).map(c => ({
+                text: c.body,
+                author: writingMode === 'research-report' ? c.author : undefined,
+                replies: c.replies.slice(0, 3).map(r => r.body)
+            }))
+        })), null, 2);
+        const prompt = writingMode === 'publish-ready' ? `
+You are a deep-research assistant preparing raw material for a human author who will write an original Medium article.
+
+Your job is NOT to summarise these discussions. Your job is to extract the RAW HUMAN MATERIAL - the emotions, tensions, confessions, insights, and story moments - that a skilled author can transform into original writing.
+
+CRITICAL: Do not reference platforms, usernames, subreddits, upvotes, or any online forum metadata in your output. Extract the HUMAN CONTENT only - as if these were private interview transcripts, not public posts.
+
+Topic: "${topic}"
+Theme: ${theme}
+
+Discussion data:
+${discussionData}
+
+Extract the following:
+
+1. keyInsights: The 5-8 most intellectually interesting observations from the discussion. Write them as standalone insights an author could build an argument around - not as summaries of what people said.
+2. quotableComments: Powerful human statements worth quoting in an article. Strip platform-specific framing. Keep the raw emotional or intellectual content. Do NOT include usernames. Include a short anonymized voiceLabel such as "an experienced practitioner", "a burned-out founder", "a skeptical reader", or "someone living with this problem".
+3. commonPainPoints: Recurring frustrations, confusions, or fears. Write as universal human experiences, not platform observations.
+4. successStories: Real transformations, breakthroughs, or positive experiences. Write as narrative seeds.
+5. controversialPoints: Genuine tensions and disagreements where smart people hold opposite views.
+6. expertOpinions: Statements that demonstrate deep knowledge, original thinking, or professional experience.
+7. statistics: Concrete numbers, percentages, timeframes, or measurable claims mentioned. Include context so the author can verify them.
+8. narrativeElements:
+   - hooks: Opening sentences or questions that would stop a reader mid-scroll.
+   - personalStories: Story seeds: character + situation + tension.
+   - transformations: Moments where someone's thinking or life genuinely changed.
+
+Return strict JSON:
+{
+    "keyInsights": ["insight1", "insight2"],
+    "quotableComments": [
+        {
+            "text": "exact quote with no platform attribution",
+            "voiceLabel": "anonymous human descriptor, not a username",
+            "context": "what emotional or intellectual moment this captures",
+            "relevance": "why an author would want to use this"
+        }
+    ],
+    "commonPainPoints": ["pain1", "pain2"],
+    "successStories": ["story1", "story2"],
+    "controversialPoints": ["point1", "point2"],
+    "expertOpinions": ["opinion1", "opinion2"],
+    "statistics": [
+        {"metric": "what is measured", "value": "the number/percentage", "context": "additional context"}
+    ],
+    "narrativeElements": {
+        "hooks": ["hook1", "hook2"],
+        "personalStories": ["story1", "story2"],
+        "transformations": ["transformation1", "transformation2"]
+    }
+}` : `
         Analyze these Reddit posts and comments about "${topic}" to extract reference material for a Medium article.
+        Theme: ${theme}
+        Writing mode: ${writingMode}
+        Mode guidance: Extract source-aware research material. Preserve enough attribution context for a writer to audit the discussion.
         
         Comments are pre-categorized by Reddit's sorting algorithms:
         - BEST: Community-validated balanced perspectives (use for key insights)
@@ -198,15 +266,7 @@ export class ReferenceMaterialService {
         - Success stories typically score high (TOP)
 
         Posts and comments data:
-        ${JSON.stringify(posts.map(p => ({
-            title: p.title,
-            content: p.selftext,
-            topComments: p.comments.slice(0, 10).map(c => ({
-                text: c.body,
-                author: c.author,
-                replies: c.replies.slice(0, 3).map(r => r.body)
-            }))
-        })), null, 2)}
+        ${discussionData}
         
         Extract the following:
         
@@ -225,7 +285,8 @@ export class ReferenceMaterialService {
             "quotableComments": [
                 {
                     "text": "exact quote",
-                    "author": "username",
+                    "author": "username when useful for source-aware audit",
+                    "voiceLabel": "anonymous descriptor such as experienced practitioner, parent, skeptical reader, or anonymous voice",
                     "context": "what they were responding to",
                     "relevance": "why this quote matters"
                 }
@@ -302,7 +363,7 @@ export class ReferenceMaterialService {
         content += `\n## Quotable Comments\n\n`;
         material.quotableComments.forEach(comment => {
             content += `> "${comment.text}"\n`;
-            content += `> — u/${comment.author}\n`;
+            content += `> — ${comment.voiceLabel || (comment.author ? `u/${comment.author}` : 'anonymous voice')}\n`;
             content += `> Context: ${comment.context}\n`;
             content += `> Relevance: ${comment.relevance}\n\n`;
         });

@@ -3,6 +3,7 @@ import { config } from '../config';
 import type {
     PipelineRequest,
     PipelineRunMetadata,
+    PipelineOpportunitiesResponse,
     PipelineProviders,
     PipelineProgressEvent,
     PipelineRun,
@@ -76,6 +77,15 @@ export const gatherReferences = async (
 
 export const runStoryPipeline = async (request: PipelineRequest): Promise<PipelineRun> => {
     const response = await axios.post(`${API_URL}/pipeline/run/sync`, request, {
+        timeout: LONG_TIMEOUT_MS,
+    });
+    return response.data;
+};
+
+export const discoverPipelineOpportunities = async (
+    request: PipelineRequest
+): Promise<PipelineOpportunitiesResponse> => {
+    const response = await axios.post(`${API_URL}/pipeline/opportunities`, request, {
         timeout: LONG_TIMEOUT_MS,
     });
     return response.data;

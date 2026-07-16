@@ -24,6 +24,7 @@ export function isArticleBrief(value: unknown): value is ArticleBrief {
         ) &&
         isStringArray(value.counterarguments) &&
         isStringArray(value.practicalTakeaways) &&
+        typeof value.authorStance === 'string' &&
         isStringArray(value.sourceNotes) &&
         isStringArray(value.risks)
     );
