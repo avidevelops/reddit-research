@@ -4,11 +4,14 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
 
 ## Features
 
+- **Direct Reddit Story**: Paste a Reddit post URL or `redd.it` short link and run the full story pipeline from that discussion
+- **Resumable Runs**: Persists stage checkpoints to disk and resumes failed runs without repeating completed research or LLM stages
 - **Sentiment-Based Search**: Search Reddit posts with emotional context
 - **Real-Time Analysis**: Analyzes posts using Google's Gemini 2.0 Flash model
 - **Subreddit Filtering**: Focus on specific community discussions
 - **Visual Feedback**: Color-coded sentiment badges and intuitive UI
-- **Time-Based Cleanup**: Automatic database maintenance with MongoDB TTL indexes
+- **Lightweight Caching**: Reuses recent trend and sentiment analysis in process memory
+- **Durable Story History**: Loads completed runs directly from local Markdown/JSON artifacts after restarts
 
 ## Tech Stack
 
@@ -16,7 +19,7 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
 
   - Node.js with TypeScript
   - Express.js
-  - MongoDB for caching
+  - In-memory caching with no database setup
   - Google Gemini 2.0 Flash API
   - Reddit API
 
@@ -39,21 +42,7 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
    brew install node
    ```
 
-2. **MongoDB Installation**
-
-   ```bash
-   # Install MongoDB using Homebrew
-   brew tap mongodb/brew
-   brew install mongodb-community
-
-   # Start MongoDB service
-   brew services start mongodb/brew/mongodb-community
-
-   # Verify MongoDB is running
-   mongosh
-   ```
-
-3. **API Keys Setup**
+2. **API Keys Setup**
    - Reddit API credentials (from https://www.reddit.com/prefs/apps)
    - Google Gemini API key (from https://makersuite.google.com/app/apikey)
 
@@ -79,7 +68,6 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
    Create a `.env` file in the root directory:
    ```env
    PORT=3000
-   MONGODB_URI=mongodb://localhost:27017/gummy_reddit
    REDDIT_CLIENT_ID=your_client_id
    REDDIT_CLIENT_SECRET=your_client_secret
    REDDIT_USER_AGENT=GummyRedditClone/1.0.0
@@ -92,13 +80,7 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
 
 ## Running the Application
 
-1. **Start MongoDB** (if not already running)
-
-   ```bash
-   brew services start mongodb/brew/mongodb-community
-   ```
-
-2. **Development Mode**
+1. **Development Mode**
 
    ```bash
    # Start both frontend and backend in development mode
@@ -109,7 +91,7 @@ A powerful tool that analyzes Reddit posts for sentiment and emotional content u
    # Backend: http://localhost:3000
    ```
 
-3. **Production Mode**
+2. **Production Mode**
 
    ```bash
    # Build the application
@@ -170,7 +152,6 @@ npm run dev:backend
 ├── src/                  # Backend source code
 │   ├── controllers/      # Request handlers
 │   ├── middleware/       # Express middlewares
-│   ├── models/          # MongoDB models
 │   ├── routes/          # API routes
 │   ├── services/        # Business logic
 │   └── utils/           # Helper functions
@@ -185,29 +166,15 @@ npm run dev:backend
 
 ## Troubleshooting
 
-1. **MongoDB Connection Issues**
-
-   ```bash
-   # Check if MongoDB is running
-   brew services list
-
-   # Restart MongoDB if needed
-   brew services restart mongodb/brew/mongodb-community
-
-   # Check MongoDB logs
-   tail -f /usr/local/var/log/mongodb/mongo.log
-   ```
-
-2. **Frontend Not Loading**
+1. **Frontend Not Loading**
 
    - Check if all dependencies are installed
    - Verify the development server is running
    - Check browser console for errors
    - Ensure proxy settings in vite.config.ts are correct
 
-3. **Backend API Issues**
+2. **Backend API Issues**
    - Verify environment variables are set correctly
-   - Check MongoDB connection
    - Ensure Reddit API credentials are valid
    - Verify Google Gemini API key is active
 
@@ -228,7 +195,7 @@ This project is licensed under the ISC License - see the LICENSE file for detail
 - Google Gemini API for sentiment analysis
 - Reddit API for data access
 - Chakra UI for the component library
-- MongoDB for efficient data caching
+- Local filesystem artifacts for durable run history
 
 ## API Documentation
 

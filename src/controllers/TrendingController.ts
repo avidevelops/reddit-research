@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { RedditPost } from '../models/RedditPost';
 import { RedditService } from '../services/RedditService';
 import { ReferenceMaterialService } from '../services/ReferenceMaterialService';
 import { TrendingTopicsService } from '../services/TrendingTopicsService';
@@ -49,19 +48,6 @@ export class TrendingController {
 
             // Analyze trending topics
             const analysis = await TrendingTopicsService.analyzeTrendingTopics(recentPosts);
-
-            // Cache the analysis results
-            for (const post of analysis.posts) {
-                await RedditPost.findOneAndUpdate(
-                    { id: post.id },
-                    {
-                        ...post,
-                        processed: true,
-                        lastAnalyzed: new Date()
-                    },
-                    { upsert: true }
-                );
-            }
 
             Logger.info(`Found ${analysis.trendingTopics.length} trending topics in r/${subreddit}`);
 

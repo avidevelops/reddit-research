@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { RedditPost } from '../models/RedditPost';
 import { RedditService } from '../services/RedditService';
+import { CachedSentimentPost, sentimentPostCache } from '../services/SentimentPostCache';
 import { SentimentAnalysisService } from '../services/SentimentAnalysisService';
 import { chunkPosts } from '../utils/batchProcessor';
 import { Logger } from '../utils/logger';
@@ -21,11 +21,7 @@ export class SearchController {
             }
 
             // First check if we have cached analyzed posts
-            const cachedPosts = await RedditPost.find({
-                subreddit: subreddit,
-                processed: true,
-                'sentiment.emotions': { $regex: sentiment, $options: 'i' }
-            }).sort({ created_utc: -1 }).limit(50);
+            const cachedPosts = sentimentPostCache.find(subreddit, sentiment);
 
             if (cachedPosts.length > 0) {
                 return res.json(cachedPosts);
@@ -41,26 +37,13 @@ export class SearchController {
             for (const batch of batches) {
                 const sentimentResults = await SentimentAnalysisService.analyzeBatch(batch);
                 
-                const batchResults = await Promise.all(
-                    batch.map(async (post: any, index: number) => {
-                        const redditPost = new RedditPost({
-                            id: post.id,
-                            subreddit: post.subreddit,
-                            title: post.title,
-                            selftext: post.selftext,
-                            created_utc: post.created_utc,
-                            author: post.author,
-                            score: post.score,
-                            num_comments: post.num_comments,
-                            sentiment: sentimentResults[index],
-                            permalink: post.permalink,
-                            processed: true
-                        });
+                const batchResults = batch.map((post, index) => ({
+                    ...post,
+                    sentiment: sentimentResults[index],
+                    processed: true as const,
+                })) as CachedSentimentPost[];
 
-                        await redditPost.save();
-                        return redditPost;
-                    })
-                );
+                batchResults.forEach(post => sentimentPostCache.save(post));
                 
                 analyzedPosts.push(...batchResults);
             }

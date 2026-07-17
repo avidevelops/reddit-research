@@ -26,7 +26,7 @@ import { FiCopy, FiDownload, FiRefreshCw } from 'react-icons/fi';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { fetchPipelineExport, getPipelineExportUrl, getPipelineRun, regeneratePipelineSection } from '../../services/api';
+import { fetchPipelineExport, getPipelineArtifactUrl, getPipelineExportUrl, getPipelineRun, regeneratePipelineSection } from '../../services/api';
 import { formatDate, qualityChartData, scoreColor } from './viewUtils';
 
 const RunDetail = () => {
@@ -74,12 +74,14 @@ const RunDetail = () => {
                     </HStack>
                     <Heading size="lg">{run.articleBrief.title}</Heading>
                 </Box>
-                <HStack>
+                <Flex gap={2} wrap="wrap" align="center">
                     <Badge colorScheme={scoreColor(qualityScore)} px={3} py={1}>Quality {qualityScore}</Badge>
+                    <Button as="a" href={getPipelineArtifactUrl(run.id, 'research-bundle')} target="_blank" variant="outline">Research</Button>
+                    <Button as="a" href={getPipelineArtifactUrl(run.id, 'reference-summary')} target="_blank" variant="outline">Reference Notes</Button>
                     <Button as="a" href={getPipelineExportUrl(run.id, 'markdown')} leftIcon={<Icon as={FiDownload} />}>Download .md</Button>
                     <Button onClick={() => copyExport('html')} leftIcon={<Icon as={FiCopy} />} variant="outline">Copy HTML</Button>
                     <Button onClick={() => copyExport('plaintext')} variant="outline">Copy Text</Button>
-                </HStack>
+                </Flex>
             </Flex>
 
             <Grid templateColumns={{ base: '1fr', xl: '300px 1fr 320px' }} gap={5}>

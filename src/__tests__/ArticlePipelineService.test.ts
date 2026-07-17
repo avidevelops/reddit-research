@@ -5,7 +5,7 @@ import { LLMService } from '../services/LLMService';
 import { ReferenceMaterialService } from '../services/ReferenceMaterialService';
 import { RedditService } from '../services/RedditService';
 import { TrendingTopicsService } from '../services/TrendingTopicsService';
-import { ArticleBrief, ArticleDraft, EditorialReview, TopicOpportunity } from '../types/pipeline';
+import { ArticleBrief, ArticleDraft, EditorialReview, PipelineCheckpoint, TopicOpportunity } from '../types/pipeline';
 import { CleanRedditPost } from '../utils/redditDataCleaner';
 
 describe('ArticlePipelineService', () => {
@@ -24,6 +24,11 @@ describe('ArticlePipelineService', () => {
         all_awardings: [],
         gilded: 0,
     };
+
+    beforeEach(() => {
+        jest.spyOn(ArtifactStorageService, 'saveCheckpoint').mockResolvedValue();
+        jest.spyOn(ArtifactStorageService, 'deleteCheckpoint').mockResolvedValue();
+    });
 
     afterEach(() => {
         jest.restoreAllMocks();
@@ -63,6 +68,7 @@ describe('ArticlePipelineService', () => {
         } as unknown as RedditService;
 
         const referenceMaterialService = {
+            saveReferenceMaterial: jest.fn().mockResolvedValue('reference-materials/programming-1-reference.json'),
             gatherReferenceMaterial: jest.fn().mockResolvedValue({
                 topicId: 'programming-1',
                 topic: 'AI tooling',
@@ -154,6 +160,7 @@ describe('ArticlePipelineService', () => {
         expect(run.request.writingMode).toBe('research-report');
         expect(run.editorialReview.finalMarkdown).toContain('Edited body');
         expect(run.artifacts.files.editedStory).toContain('edited-story.md');
+        expect(referenceMaterialService.saveReferenceMaterial).toHaveBeenCalledTimes(1);
     });
 
     it('discovers opportunities without gathering references', async () => {
@@ -161,6 +168,7 @@ describe('ArticlePipelineService', () => {
             getSubredditPosts: jest.fn().mockResolvedValue([post]),
         } as unknown as RedditService;
         const referenceMaterialService = {
+            saveReferenceMaterial: jest.fn(),
             gatherReferenceMaterial: jest.fn(),
         } as unknown as ReferenceMaterialService;
 
@@ -249,6 +257,7 @@ describe('ArticlePipelineService', () => {
             getSubredditPosts: jest.fn(),
         } as unknown as RedditService;
         const referenceMaterialService = {
+            saveReferenceMaterial: jest.fn().mockResolvedValue('reference-materials/programming-1-reference.json'),
             gatherReferenceMaterial: jest.fn().mockResolvedValue({
                 topicId: 'programming-1',
                 topic: 'AI tooling',
@@ -325,5 +334,261 @@ describe('ArticlePipelineService', () => {
             'programming',
             { theme: 'Technology', writingMode: 'publish-ready' }
         );
+        expect(referenceMaterialService.saveReferenceMaterial).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs from a direct Reddit post URL without subreddit discovery', async () => {
+        const brief: ArticleBrief = {
+            title: 'The AI Tooling Hangover',
+            headlineOptions: ['The AI Tooling Hangover'],
+            hookOptions: ['The tool was not the hard part.'],
+            thesis: 'AI tools require better workflows.',
+            targetAudience: 'Developers',
+            promise: 'A practical framework.',
+            outline: [{ heading: 'The tension', purpose: 'Set context', evidence: ['Source discussion'] }],
+            counterarguments: [],
+            practicalTakeaways: ['Measure workflow quality.'],
+            authorStance: 'Workflow matters more than novelty.',
+            sourceNotes: ['Direct Reddit post'],
+            risks: ['Avoid overclaiming.'],
+        };
+        const draft: ArticleDraft = {
+            title: brief.title,
+            markdown: '# The AI Tooling Hangover\n\nDraft.',
+            sourceLinks: [],
+            estimatedReadTime: 5,
+        };
+        const review: EditorialReview = {
+            score: 86,
+            strengths: ['Focused'],
+            improvements: [],
+            factCheckNotes: [],
+            finalMarkdown: '# The AI Tooling Hangover\n\nFinal.',
+        };
+        const redditService = {
+            getPostById: jest.fn().mockResolvedValue(post),
+            getSubredditPosts: jest.fn(),
+        } as unknown as RedditService;
+        const referenceMaterialService = {
+            gatherReferenceMaterial: jest.fn().mockResolvedValue({
+                topicId: 'programming-1',
+                topic: 'AI tooling',
+                sourcePosts: [{ ...post, comments: [] }],
+                keyInsights: ['Workflow design matters.'],
+                quotableComments: [],
+                commonPainPoints: [],
+                successStories: [],
+                controversialPoints: [],
+                expertOpinions: [],
+                statistics: [],
+                narrativeElements: { hooks: [], personalStories: [], transformations: [] },
+            }),
+            saveReferenceMaterial: jest.fn().mockResolvedValue('reference-material.json'),
+        } as unknown as ReferenceMaterialService;
+
+        jest.spyOn(TrendingTopicsService, 'analyzeTrendingTopics').mockResolvedValue({
+            posts: [post],
+            trendingTopics: [{
+                topic: 'AI tooling',
+                category: 'Software development',
+                engagementScore: 80,
+                viralPotential: 75,
+                mediumSuccessProbability: 90,
+                keyThemes: ['AI', 'workflow'],
+                storyAngles: ['Workflow over hype'],
+                targetAudience: 'Developers',
+                estimatedReadTime: 6,
+                hooks: ['The tool was not the hard part.'],
+                relevantPosts: [post],
+            }],
+            overallTheme: 'AI workflow tradeoffs',
+            bestStoryOpportunity: {
+                title: brief.title,
+                angle: 'Workflow over hype',
+                whyItWillWork: 'It starts from a focused user-selected discussion.',
+            },
+        });
+        jest.spyOn(ArticleQualityService, 'improveIfNeeded').mockResolvedValue({
+            improved: false,
+            finalMarkdown: review.finalMarkdown,
+            finalScore: 86,
+            qualityGate: {
+                passed: true,
+                score: 86,
+                dimensionScores: {
+                    hookStrength: 86,
+                    thesisClarity: 86,
+                    evidenceDensity: 86,
+                    narrativeArc: 86,
+                    mediumFormatCompliance: 86,
+                    originality: 86,
+                },
+                blockers: [],
+                suggestions: [],
+            },
+        });
+        jest.spyOn(ArtifactStorageService, 'saveRunArtifacts').mockResolvedValue({
+            directory: 'story-outputs/direct-post',
+            files: {},
+        });
+
+        const service = new ArticlePipelineService(redditService, referenceMaterialService);
+        jest.spyOn(service, 'generateBrief').mockResolvedValue(brief);
+        jest.spyOn(service, 'generateDraft').mockResolvedValue(draft);
+        jest.spyOn(service, 'editDraft').mockResolvedValue(review);
+
+        const run = await service.runPipeline({
+            redditPostUrl: 'https://www.reddit.com/r/programming/comments/abc123/a_story/',
+            theme: 'Technology',
+            writingMode: 'publish-ready',
+        });
+
+        expect(redditService.getPostById).toHaveBeenCalledWith('abc123');
+        expect(redditService.getSubredditPosts).not.toHaveBeenCalled();
+        expect(run.selectedOpportunity.relevantPosts).toEqual([post]);
+        expect(run.request.redditPostUrl).toContain('/comments/abc123/');
+        expect(referenceMaterialService.gatherReferenceMaterial).toHaveBeenCalledWith(
+            'AI tooling',
+            ['abc123'],
+            'programming',
+            { theme: 'Technology', writingMode: 'publish-ready' }
+        );
+    });
+
+    it('resumes from the first incomplete stage without repeating saved LLM work', async () => {
+        const opportunity: TopicOpportunity = {
+            id: 'programming-ai-tooling',
+            topic: 'AI tooling',
+            category: 'Technology',
+            sourceSubreddit: 'programming',
+            engagementScore: 80,
+            viralPotential: 75,
+            mediumSuccessProbability: 90,
+            score: 85,
+            keyThemes: ['AI'],
+            storyAngles: ['Workflow over hype'],
+            targetAudience: 'Developers',
+            estimatedReadTime: 6,
+            hooks: ['The tool was not the hard part.'],
+            relevantPosts: [post],
+            whyItWorks: 'Focused discussion.',
+        };
+        const researchBundle = {
+            topic: opportunity.topic,
+            sourceSubreddit: 'programming',
+            opportunity,
+            keyInsights: ['Workflow matters.'],
+            quotes: [],
+            painPoints: [],
+            successStories: [],
+            controversialPoints: [],
+            expertOpinions: [],
+            statistics: [],
+            sourcePosts: [{
+                id: post.id,
+                title: post.title,
+                author: post.author,
+                score: post.score,
+                num_comments: post.num_comments,
+                permalink: `https://reddit.com${post.permalink}`,
+            }],
+        };
+        const brief: ArticleBrief = {
+            title: 'AI Tooling',
+            headlineOptions: ['AI Tooling'],
+            hookOptions: ['A hook'],
+            thesis: 'Workflow matters.',
+            targetAudience: 'Developers',
+            promise: 'Clarity.',
+            outline: [{ heading: 'Start', purpose: 'Explain', evidence: ['Discussion'] }],
+            counterarguments: [],
+            practicalTakeaways: [],
+            authorStance: 'Workflow first.',
+            sourceNotes: [],
+            risks: [],
+        };
+        const draft: ArticleDraft = {
+            title: brief.title,
+            markdown: '# AI Tooling\n\nDraft.',
+            sourceLinks: [],
+            estimatedReadTime: 5,
+        };
+        const review: EditorialReview = {
+            score: 88,
+            strengths: ['Clear'],
+            improvements: [],
+            factCheckNotes: [],
+            finalMarkdown: '# AI Tooling\n\nEdited.',
+        };
+        const checkpoint: PipelineCheckpoint = {
+            id: 'failed-run-1',
+            createdAt: '2026-07-16T10:00:00.000Z',
+            updatedAt: '2026-07-16T10:05:00.000Z',
+            status: 'failed',
+            completedStage: 'draft',
+            failedStage: 'editing',
+            error: 'Editor failed',
+            runDirectory: 'story-outputs/failed-run-1',
+            request: {
+                subreddits: ['programming'],
+                timeframe: 'week',
+                limit: 40,
+                topicsToGather: 3,
+                targetAudience: 'Developers',
+                articleStyle: 'narrative essay',
+                theme: 'Technology',
+                writingMode: 'research-report',
+            },
+            opportunities: [opportunity],
+            selectedOpportunity: opportunity,
+            researchBundle,
+            articleBrief: brief,
+            draft,
+        };
+        const redditService = {
+            getSubredditPosts: jest.fn(),
+            getPostById: jest.fn(),
+        } as unknown as RedditService;
+        const referenceMaterialService = {
+            gatherReferenceMaterial: jest.fn(),
+            saveReferenceMaterial: jest.fn(),
+        } as unknown as ReferenceMaterialService;
+        jest.spyOn(ArtifactStorageService, 'getCheckpoint').mockResolvedValue(checkpoint);
+        jest.spyOn(ArtifactStorageService, 'saveRunArtifacts').mockResolvedValue({
+            directory: checkpoint.runDirectory,
+            files: {},
+        });
+        jest.spyOn(ArticleQualityService, 'improveIfNeeded').mockImplementation(async run => ({
+            improved: false,
+            finalMarkdown: run.editorialReview.finalMarkdown,
+            finalScore: 88,
+            qualityGate: {
+                passed: true,
+                score: 88,
+                dimensionScores: {
+                    hookStrength: 88,
+                    thesisClarity: 88,
+                    evidenceDensity: 88,
+                    narrativeArc: 88,
+                    mediumFormatCompliance: 88,
+                    originality: 88,
+                },
+                blockers: [],
+                suggestions: [],
+            },
+        }));
+
+        const service = new ArticlePipelineService(redditService, referenceMaterialService);
+        const briefSpy = jest.spyOn(service, 'generateBrief');
+        const draftSpy = jest.spyOn(service, 'generateDraft');
+        const editSpy = jest.spyOn(service, 'editDraft').mockResolvedValue(review);
+        const run = await service.resumePipeline(checkpoint.id);
+
+        expect(briefSpy).not.toHaveBeenCalled();
+        expect(draftSpy).not.toHaveBeenCalled();
+        expect(referenceMaterialService.gatherReferenceMaterial).not.toHaveBeenCalled();
+        expect(editSpy).toHaveBeenCalledTimes(1);
+        expect(run.id).toBe(checkpoint.id);
+        expect(ArtifactStorageService.deleteCheckpoint).toHaveBeenCalledWith(checkpoint.runDirectory);
     });
 });

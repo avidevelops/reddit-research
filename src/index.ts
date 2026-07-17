@@ -1,6 +1,5 @@
 import cors from 'cors';
 import express from 'express';
-import mongoose from 'mongoose';
 import swaggerUi from 'swagger-ui-express';
 import { config } from './config/config';
 import { specs } from './config/swagger';
@@ -32,21 +31,13 @@ app.use((req, res, next) => {
 });
 app.use(apiErrorHandler);
 
-// Connect to MongoDB
-const startServer = async () => {
-    try {
-        await mongoose.connect(config.mongodb.uri);
-        Logger.info('Connected to MongoDB');
-
-        app.listen(config.port, () => {
-            Logger.info(`Server is running on port ${config.port}`);
-            Logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-            Logger.info(`API Documentation available at http://localhost:${config.port}/api-docs`);
-        });
-    } catch (err) {
-        Logger.error('Failed to start server:', err);
-        process.exit(1);
+app.listen(config.port, (error?: Error) => {
+    if (error) {
+        Logger.error(`Failed to start server on port ${config.port}`, error);
+        process.exitCode = 1;
+        return;
     }
-};
-
-startServer();
+    Logger.info(`Server is running on port ${config.port}`);
+    Logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    Logger.info(`API Documentation available at http://localhost:${config.port}/api-docs`);
+});

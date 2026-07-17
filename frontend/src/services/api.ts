@@ -91,14 +91,15 @@ export const discoverPipelineOpportunities = async (
     return response.data;
 };
 
-export const streamStoryPipeline = async (
-    request: PipelineRequest,
+const streamPipelineRequest = async (
+    url: string,
+    body: PipelineRequest | undefined,
     onEvent: (event: PipelineProgressEvent) => void
 ): Promise<void> => {
-    const response = await fetch(`${API_URL}/pipeline/run`, {
+    const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
+        body: body ? JSON.stringify(body) : undefined,
     });
 
     if (!response.ok || !response.body) {
@@ -108,6 +109,7 @@ export const streamStoryPipeline = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let pipelineError: string | undefined;
 
     while (true) {
         const { value, done } = await reader.read();
@@ -120,13 +122,27 @@ export const streamStoryPipeline = async (
             const eventLine = chunk.split('\n').find(line => line.startsWith('event: '));
             const dataLine = chunk.split('\n').find(line => line.startsWith('data: '));
             if (!eventLine || !dataLine) continue;
-            onEvent({
-                event: eventLine.replace('event: ', '').trim(),
-                data: JSON.parse(dataLine.replace('data: ', '')),
-            });
+            const event = eventLine.replace('event: ', '').trim();
+            const data = JSON.parse(dataLine.replace('data: ', ''));
+            onEvent({ event, data });
+            if (event === 'error') {
+                pipelineError = data?.error || data?.message || 'Pipeline failed';
+            }
         }
     }
+
+    if (pipelineError) throw new Error(pipelineError);
 };
+
+export const streamStoryPipeline = async (
+    request: PipelineRequest,
+    onEvent: (event: PipelineProgressEvent) => void
+): Promise<void> => streamPipelineRequest(`${API_URL}/pipeline/run`, request, onEvent);
+
+export const resumePipelineRun = async (
+    runId: string,
+    onEvent: (event: PipelineProgressEvent) => void
+): Promise<void> => streamPipelineRequest(`${API_URL}/pipeline/runs/${runId}/resume`, undefined, onEvent);
 
 export const getPipelineProviders = async (): Promise<PipelineProviders> => {
     const response = await axios.get(`${API_URL}/pipeline/providers`);
@@ -165,6 +181,11 @@ export const getPipelineExportUrl = (
     runId: string,
     format: 'markdown' | 'html' | 'plaintext' = 'markdown'
 ): string => `${API_URL}/pipeline/runs/${runId}/export?format=${format}`;
+
+export const getPipelineArtifactUrl = (
+    runId: string,
+    artifact: 'research-bundle' | 'reference-material' | 'reference-summary'
+): string => `${API_URL}/pipeline/runs/${runId}/artifacts/${artifact}`;
 
 export const fetchPipelineExport = async (
     runId: string,

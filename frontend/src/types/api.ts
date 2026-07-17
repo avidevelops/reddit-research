@@ -197,7 +197,8 @@ export interface PipelineArtifacts {
 }
 
 export interface PipelineRequest {
-    subreddits: string[];
+    subreddits?: string[];
+    redditPostUrl?: string;
     timeframe?: 'day' | 'week' | 'month';
     limit?: number;
     topicsToGather?: number;
@@ -223,6 +224,7 @@ export interface PipelineRun {
         theme: string;
         writingMode: WritingMode;
         outputDir?: string;
+        redditPostUrl?: string;
         selectedOpportunityId?: string;
     };
     opportunities: TopicOpportunity[];
@@ -242,10 +244,15 @@ export interface PipelineRunMetadata {
     id: string;
     topic: string;
     createdAt: string;
-    score: number;
+    status: 'completed' | 'failed' | 'running';
+    score?: number;
     wordCount: number;
     estimatedReadTime: number;
     directory: string;
+    completedStage?: 'opportunity' | 'research' | 'brief' | 'draft' | 'edit' | 'quality';
+    failedStage?: 'researching' | 'briefing' | 'drafting' | 'editing' | 'quality' | 'saving';
+    error?: string;
+    resumable: boolean;
 }
 
 export interface PipelineProviders {

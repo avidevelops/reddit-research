@@ -34,12 +34,20 @@ router.get('/runs', asyncHandler(async (req: Request, res: Response) => {
     await pipelineController.listRuns(req, res);
 }));
 
+router.post('/runs/:runId/resume', withLongTimeout, asyncHandler(async (req: Request, res: Response) => {
+    await pipelineController.resumePipeline(req, res);
+}));
+
 router.get('/runs/:runId', asyncHandler(async (req: Request, res: Response) => {
     await pipelineController.getRun(req, res);
 }));
 
 router.get('/runs/:runId/export', asyncHandler(async (req: Request, res: Response) => {
     await pipelineController.exportRun(req, res);
+}));
+
+router.get('/runs/:runId/artifacts/:artifact', asyncHandler(async (req: Request, res: Response) => {
+    await pipelineController.getReviewArtifact(req, res);
 }));
 
 router.delete('/runs/:runId', asyncHandler(async (req: Request, res: Response) => {

@@ -42,6 +42,25 @@ export class PipelineController {
         }
     }
 
+    async resumePipeline(req: Request, res: Response): Promise<void> {
+        const sse = new SSEEmitter(res);
+        req.setTimeout(600000, () => {
+            sse.emit('error', { error: 'Request timeout' });
+            sse.done();
+        });
+
+        try {
+            await this.pipelineService.resumePipeline(req.params.runId, (event, data) => {
+                sse.emit(event, data);
+            });
+            sse.done();
+        } catch (error: any) {
+            Logger.error('Pipeline resume failed', error);
+            sse.emit('error', { error: error?.message || 'Pipeline resume failed' });
+            sse.done();
+        }
+    }
+
     async discoverOpportunities(req: Request, res: Response): Promise<void> {
         try {
             const opportunities = await this.pipelineService.discoverOpportunities(req.body);
@@ -77,6 +96,27 @@ export class PipelineController {
         res.setHeader('Content-Type', ArtifactStorageService.getExportContentType(format));
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(content);
+    }
+
+    async getReviewArtifact(req: Request, res: Response): Promise<void> {
+        const artifact = req.params.artifact;
+        if (artifact !== 'research-bundle' && artifact !== 'reference-material' && artifact !== 'reference-summary') {
+            throw new ApiError(400, 'Unsupported review artifact');
+        }
+
+        const run = await ArtifactStorageService.getRun(req.params.runId, req.query.outputDir?.toString());
+        if (!run) {
+            throw new ApiError(404, 'Pipeline run not found');
+        }
+
+        const result = await ArtifactStorageService.readReviewArtifact(run, artifact);
+        if (!result) {
+            throw new ApiError(404, 'Review artifact not found for this run');
+        }
+
+        res.setHeader('Content-Type', result.contentType);
+        res.setHeader('Content-Disposition', `inline; filename="${result.filename}"`);
+        res.send(result.content);
     }
 
     async deleteRun(req: Request, res: Response): Promise<void> {

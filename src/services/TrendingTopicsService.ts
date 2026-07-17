@@ -1,8 +1,10 @@
+import { createHash } from 'crypto';
 import { config, genAI } from '../config/config';
 import { ApiError } from '../middleware/errorMiddleware';
 import { extractJson } from '../utils/llmJson';
 import { Logger } from '../utils/logger';
-import {CleanRedditPost} from "../utils/redditDataCleaner";
+import { CleanRedditPost } from '../utils/redditDataCleaner';
+import { InMemoryCache } from './InMemoryCache';
 
 const model = genAI.getGenerativeModel({ model: config.model });
 
@@ -47,6 +49,12 @@ export interface PostAnalysis {
 }
 
 export class TrendingTopicsService {
+    private static readonly analysisCache = new InMemoryCache<PostAnalysis>(
+        Number(process.env.TRENDING_CACHE_TTL_MS) || 15 * 60 * 1000,
+        100
+    );
+    private static readonly pendingAnalyses = new Map<string, Promise<PostAnalysis>>();
+
     private static readonly TRENDING_ANALYSIS_PROMPT = `
     Analyze these Reddit posts to identify trending topics worth writing about on Medium.
     Theme focus: {theme}
@@ -153,6 +161,37 @@ export class TrendingTopicsService {
             throw new ApiError(400, 'No posts to analyze');
         }
 
+        const cacheKey = this.buildCacheKey(posts, options.theme);
+        const cached = this.analysisCache.get(cacheKey);
+        if (cached) {
+            Logger.info(`Using cached trending analysis for ${posts.length} posts`);
+            return this.cloneAnalysis(cached);
+        }
+
+        const pending = this.pendingAnalyses.get(cacheKey);
+        if (pending) {
+            Logger.info(`Reusing in-progress trending analysis for ${posts.length} posts`);
+            return this.cloneAnalysis(await pending);
+        }
+
+        const analysisPromise = this.performAnalysis(posts, options);
+        this.pendingAnalyses.set(cacheKey, analysisPromise);
+        try {
+            const analysis = await analysisPromise;
+            this.analysisCache.set(cacheKey, analysis);
+            return this.cloneAnalysis(analysis);
+        } finally {
+            this.pendingAnalyses.delete(cacheKey);
+        }
+    }
+
+    static clearAnalysisCache(): void {
+        this.analysisCache.clear();
+        this.pendingAnalyses.clear();
+    }
+
+    private static async performAnalysis(posts: CleanRedditPost[], options: { theme?: string }): Promise<PostAnalysis> {
+
         try {
             // Calculate engagement metrics
             const metrics = this.calculateEngagementMetrics(posts);
@@ -205,6 +244,24 @@ export class TrendingTopicsService {
             }
             throw new ApiError(500, 'Trending analysis service unavailable');
         }
+    }
+
+    private static buildCacheKey(posts: CleanRedditPost[], theme?: string): string {
+        const input = {
+            theme: theme?.trim().toLowerCase() || 'general interest',
+            posts: posts.map(post => ({
+                id: post.id,
+                score: post.score,
+                numComments: post.num_comments,
+                title: post.title,
+                selftext: post.selftext?.slice(0, 500) || '',
+            })),
+        };
+        return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+    }
+
+    private static cloneAnalysis(analysis: PostAnalysis): PostAnalysis {
+        return JSON.parse(JSON.stringify(analysis)) as PostAnalysis;
     }
 
     static async findTrendingInSubreddit(subreddit: string, timeframe: 'day' | 'week' | 'month' = 'week'): Promise<PostAnalysis> {

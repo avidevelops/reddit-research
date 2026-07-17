@@ -43,9 +43,6 @@ export interface LoggingConfig {
 interface Config {
     model: string;
     port: number;
-    mongodb: {
-        uri: string;
-    };
     reddit: {
         clientId: string;
         clientSecret: string;
@@ -129,9 +126,6 @@ export const config: Config = {
     llmProvider,
 
     port: getPort(),
-    mongodb: {
-        uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/gummy_reddit'
-    },
     reddit: {
         clientId: process.env.REDDIT_CLIENT_ID!,
         clientSecret: process.env.REDDIT_CLIENT_SECRET!,

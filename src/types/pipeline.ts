@@ -2,9 +2,12 @@ import { CleanRedditPost } from '../utils/redditDataCleaner';
 
 export type PipelineTimeframe = 'day' | 'week' | 'month';
 export type WritingMode = 'research-report' | 'publish-ready';
+export type PipelineCompletedStage = 'opportunity' | 'research' | 'brief' | 'draft' | 'edit' | 'quality';
+export type PipelineExecutionStage = 'researching' | 'briefing' | 'drafting' | 'editing' | 'quality' | 'saving';
 
 export interface PipelineRequest {
-    subreddits: string[];
+    subreddits?: string[];
+    redditPostUrl?: string;
     timeframe?: PipelineTimeframe;
     limit?: number;
     topicsToGather?: number;
@@ -97,6 +100,7 @@ export interface PipelineRequestSnapshot {
     theme: string;
     writingMode: WritingMode;
     outputDir?: string;
+    redditPostUrl?: string;
     selectedOpportunityId?: string;
 }
 
@@ -155,10 +159,33 @@ export interface PipelineRunMetadata {
     id: string;
     topic: string;
     createdAt: string;
-    score: number;
+    status: 'completed' | 'failed' | 'running';
+    score?: number;
     wordCount: number;
     estimatedReadTime: number;
     directory: string;
+    completedStage?: PipelineCompletedStage;
+    failedStage?: PipelineExecutionStage;
+    error?: string;
+    resumable: boolean;
+}
+
+export interface PipelineCheckpoint {
+    id: string;
+    createdAt: string;
+    updatedAt: string;
+    status: 'running' | 'failed';
+    completedStage: PipelineCompletedStage;
+    failedStage?: PipelineExecutionStage;
+    error?: string;
+    runDirectory: string;
+    request: PipelineRequestSnapshot;
+    opportunities: TopicOpportunity[];
+    selectedOpportunity: TopicOpportunity;
+    researchBundle?: ResearchBundle;
+    articleBrief?: ArticleBrief;
+    draft?: ArticleDraft;
+    editorialReview?: EditorialReview;
 }
 
 export interface PipelineProgressCallback {

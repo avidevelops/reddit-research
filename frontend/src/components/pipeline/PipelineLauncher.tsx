@@ -24,7 +24,7 @@ import {
 } from '@chakra-ui/react';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { FiDownload, FiEye, FiPlay, FiZap } from 'react-icons/fi';
+import { FiDownload, FiEye, FiLink, FiPlay, FiZap } from 'react-icons/fi';
 import { Link as RouterLink } from 'react-router-dom';
 import { getPipelineExportUrl, getPipelineProviders, streamStoryPipeline } from '../../services/api';
 import { usePipelineStore } from '../../store/pipelineStore';
@@ -53,6 +53,7 @@ const PipelineLauncher = () => {
     const [outputDir, setOutputDir] = useState('story-outputs');
     const [limit, setLimit] = useState(40);
     const [topicsToGather, setTopicsToGather] = useState(3);
+    const [redditPostUrl, setRedditPostUrl] = useState('');
     const toast = useToast();
     const {
         isRunning,
@@ -88,10 +89,15 @@ const PipelineLauncher = () => {
         setArticleStyle(preset.articleStyle);
     };
 
-    const runPipeline = async () => {
+    const runPipeline = async (source: 'lucky' | 'reddit-post') => {
         const parsedSubreddits = splitSubreddits(subreddits);
-        if (parsedSubreddits.length === 0) {
+        const directUrl = redditPostUrl.trim();
+        if (source === 'lucky' && parsedSubreddits.length === 0) {
             toast({ title: 'Add at least one subreddit', status: 'warning' });
+            return;
+        }
+        if (source === 'reddit-post' && !directUrl) {
+            toast({ title: 'Paste a Reddit post URL', status: 'warning' });
             return;
         }
 
@@ -99,7 +105,8 @@ const PipelineLauncher = () => {
         startRun();
         try {
             await streamStoryPipeline({
-                subreddits: parsedSubreddits,
+                subreddits: source === 'lucky' ? parsedSubreddits : undefined,
+                redditPostUrl: source === 'reddit-post' ? directUrl : undefined,
                 timeframe,
                 articleStyle,
                 targetAudience,
@@ -141,11 +148,38 @@ const PipelineLauncher = () => {
                             {providers.activeProvider} / {providers.model}
                         </Badge>
                     )}
-                    <Button leftIcon={<Icon as={FiPlay} />} colorScheme="blue" onClick={runPipeline} isLoading={isRunning}>
+                    <Button leftIcon={<Icon as={FiPlay} />} colorScheme="blue" onClick={() => runPipeline('lucky')} isLoading={isRunning}>
                         Start pipeline
                     </Button>
                 </HStack>
             </Flex>
+
+            <Card borderColor="purple.200" borderWidth="1px">
+                <CardBody>
+                    <Flex gap={4} align={{ base: 'stretch', md: 'end' }} direction={{ base: 'column', md: 'row' }}>
+                        <FormControl flex="1">
+                            <FormLabel>Generate from a Reddit post</FormLabel>
+                            <Input
+                                type="url"
+                                placeholder="https://www.reddit.com/r/.../comments/..."
+                                value={redditPostUrl}
+                                onChange={(event) => setRedditPostUrl(event.target.value)}
+                            />
+                            <Text fontSize="xs" color="gray.500" mt={1}>
+                                Supports Reddit post links, share links, and redd.it links. The pipeline uses the post and its discussion as source material.
+                            </Text>
+                        </FormControl>
+                        <Button
+                            leftIcon={<Icon as={FiLink} />}
+                            colorScheme="purple"
+                            onClick={() => runPipeline('reddit-post')}
+                            isLoading={isRunning}
+                        >
+                            Generate story
+                        </Button>
+                    </Flex>
+                </CardBody>
+            </Card>
 
             <Card>
                 <CardBody>

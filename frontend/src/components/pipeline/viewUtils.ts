@@ -1,6 +1,7 @@
 export const stageOrder = ['discovering', 'opportunities', 'researching', 'briefing', 'drafting', 'editing', 'quality', 'complete'];
 
 export const stageLabel: Record<string, string> = {
+    resuming: 'Resume',
     discovering: 'Discover',
     opportunities: 'Score',
     researching: 'Research',

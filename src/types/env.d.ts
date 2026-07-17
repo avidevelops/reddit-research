@@ -3,7 +3,6 @@ declare global {
         interface ProcessEnv {
             PORT?: string;
             NODE_ENV: 'development' | 'production';
-            MONGODB_URI: string;
             REDDIT_CLIENT_ID: string;
             REDDIT_CLIENT_SECRET: string;
             REDDIT_USER_AGENT: string;

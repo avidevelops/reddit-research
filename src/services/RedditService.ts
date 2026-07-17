@@ -103,6 +103,34 @@ export class RedditService {
         }
     }
 
+    async getPostById(postId: string): Promise<CleanRedditPost | null> {
+        const token = await this.getAccessToken();
+        const response = await fetch(
+            `https://oauth.reddit.com/api/info?id=t3_${encodeURIComponent(postId)}`,
+            {
+                headers: new Headers({
+                    'Authorization': `Bearer ${token}`,
+                    'User-Agent': config.reddit.userAgent || '',
+                }),
+            }
+        );
+
+        const data = await response.json() as RedditResponse;
+        const rawPost = data.data?.children?.[0]?.data;
+        return rawPost ? RedditDataCleaner.cleanPost(rawPost) : null;
+    }
+
+    async resolveRedditPostUrl(url: string): Promise<string> {
+        const response = await fetch(url, {
+            method: 'GET',
+            redirect: 'follow',
+            headers: new Headers({
+                'User-Agent': config.reddit.userAgent || '',
+            }),
+        });
+        return response.url;
+    }
+
     async searchSubreddit(subreddit: string, query: string): Promise<CleanRedditPost[]> {
         const token = await this.getAccessToken();
         const response = await fetch(

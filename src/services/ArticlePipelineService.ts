@@ -1,12 +1,14 @@
 import { randomUUID } from 'crypto';
 import { ApiError } from '../middleware/errorMiddleware';
-import { ArticleBrief, ArticleDraft, EditorialReview, PipelineProgressCallback, PipelineRequest, PipelineRequestSnapshot, PipelineRun, PipelineTimeframe, ResearchBundle, TopicOpportunity, WritingMode } from '../types/pipeline';
+import { ArticleBrief, ArticleDraft, EditorialReview, PipelineCheckpoint, PipelineExecutionStage, PipelineProgressCallback, PipelineRequest, PipelineRequestSnapshot, PipelineRun, PipelineTimeframe, ResearchBundle, TopicOpportunity, WritingMode } from '../types/pipeline';
 import { CleanRedditPost } from '../utils/redditDataCleaner';
 import { isArticleBrief, isArticleDraft, isEditorialReview } from '../utils/pipelineValidators';
 import { Logger } from '../utils/logger';
+import { isSupportedRedditPostUrl, parseRedditPostUrl } from '../utils/redditPostUrl';
 import { ArtifactStorageService } from './ArtifactStorageService';
 import { ArticleQualityService } from './ArticleQualityService';
 import { LLMService } from './LLMService';
+import { PipelineExecutionRegistry } from './PipelineExecutionRegistry';
 import { buildBriefPrompt, buildDraftPrompt, buildEditPrompt, toPromptContext } from './pipelinePrompts';
 import { RedditService } from './RedditService';
 import { ReferenceMaterial, ReferenceMaterialService } from './ReferenceMaterialService';
@@ -24,6 +26,7 @@ interface NormalizedPipelineRequest {
     outputDir?: string;
     selectedOpportunity?: TopicOpportunity;
     opportunitiesSnapshot?: TopicOpportunity[];
+    redditPostUrl?: string;
 }
 
 interface SubredditAnalysis {
@@ -61,6 +64,9 @@ export class ArticlePipelineService {
                 topTopic: selectedOpportunity.topic,
                 selected: true,
             });
+        } else if (normalized.redditPostUrl) {
+            selectedOpportunity = await this.discoverDirectPostOpportunity(normalized, onProgress);
+            opportunities = [selectedOpportunity];
         } else {
             opportunities = await this.discoverOpportunities(normalized, onProgress);
             selectedOpportunity = opportunities[0];
@@ -70,49 +76,183 @@ export class ArticlePipelineService {
             throw new ApiError(404, 'No viable story opportunities found');
         }
 
-        onProgress?.('stage', { stage: 'researching', topic: selectedOpportunity.topic });
-        const researchBundle = await this.gatherResearchBundle(selectedOpportunity, normalized);
-        onProgress?.('stage', { stage: 'briefing' });
-        const articleBrief = await this.generateBrief(researchBundle, normalized);
-        onProgress?.('stage', { stage: 'drafting', wordEstimate: selectedOpportunity.estimatedReadTime * 220 });
-        const draft = await this.generateDraft(articleBrief, researchBundle, normalized);
-        onProgress?.('stage', { stage: 'editing' });
-        const editorialReview = await this.editDraft(draft, articleBrief, researchBundle, normalized);
-
-        const runBase: Omit<PipelineRun, 'artifacts'> = {
+        const runDirectory = ArtifactStorageService.buildRunDirectory(selectedOpportunity.topic, normalized.outputDir);
+        const checkpoint: PipelineCheckpoint = {
             id: randomUUID(),
             createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            status: 'running',
+            completedStage: 'opportunity',
+            runDirectory,
             request: this.toRequestSnapshot(normalized, selectedOpportunity),
             opportunities,
             selectedOpportunity,
-            researchBundle,
-            articleBrief,
-            draft,
-            editorialReview,
         };
+        await ArtifactStorageService.saveCheckpoint(checkpoint);
+        return this.continueFromCheckpoint(checkpoint, normalized, onProgress);
+    }
 
-        const qualityRun = { ...runBase, artifacts: { directory: '', files: {} } };
-        const improvement = await ArticleQualityService.improveIfNeeded(qualityRun);
-        runBase.editorialReview = {
-            ...qualityRun.editorialReview,
-            qualityGate: improvement.qualityGate,
-        };
-        onProgress?.('stage', { stage: 'quality', score: improvement.finalScore, improved: improvement.improved });
+    async resumePipeline(runId: string, onProgress?: PipelineProgressCallback): Promise<PipelineRun> {
+        const checkpoint = await ArtifactStorageService.getCheckpoint(runId);
+        if (!checkpoint) {
+            throw new ApiError(404, 'Resumable pipeline run not found');
+        }
 
-        const runDirectory = ArtifactStorageService.buildRunDirectory(selectedOpportunity.topic, normalized.outputDir);
-        const artifacts = await ArtifactStorageService.saveRunArtifacts({
-            runDirectory,
-            run: runBase,
-            researchBundle,
-            articleBrief,
-            draft,
-            editorialReview,
+        checkpoint.status = 'running';
+        checkpoint.error = undefined;
+        checkpoint.failedStage = undefined;
+        checkpoint.updatedAt = new Date().toISOString();
+        await ArtifactStorageService.saveCheckpoint(checkpoint);
+        onProgress?.('stage', { stage: 'resuming', completedStage: checkpoint.completedStage });
+        const normalized = this.normalizeRequest({
+            ...checkpoint.request,
+            selectedOpportunity: checkpoint.selectedOpportunity,
+            opportunitiesSnapshot: checkpoint.opportunities,
         });
+        return this.continueFromCheckpoint(checkpoint, normalized, onProgress);
+    }
 
-        Logger.info(`Pipeline run ${runBase.id} saved to ${artifacts.directory}`);
-        const run = { ...runBase, artifacts };
-        onProgress?.('complete', run);
-        return run;
+    private async continueFromCheckpoint(
+        checkpoint: PipelineCheckpoint,
+        normalized: NormalizedPipelineRequest,
+        onProgress?: PipelineProgressCallback
+    ): Promise<PipelineRun> {
+        if (!PipelineExecutionRegistry.start(checkpoint.id)) {
+            throw new ApiError(409, 'This pipeline run is already active');
+        }
+        let currentStage: PipelineExecutionStage = 'researching';
+        try {
+            if (!checkpoint.researchBundle) {
+                currentStage = 'researching';
+                onProgress?.('stage', { stage: currentStage, topic: checkpoint.selectedOpportunity.topic });
+                checkpoint.researchBundle = await this.gatherResearchBundle(
+                    checkpoint.selectedOpportunity,
+                    normalized,
+                    checkpoint.runDirectory
+                );
+                await this.markCheckpointComplete(checkpoint, 'research');
+            }
+
+            if (!checkpoint.articleBrief) {
+                currentStage = 'briefing';
+                onProgress?.('stage', { stage: currentStage });
+                checkpoint.articleBrief = await this.generateBrief(checkpoint.researchBundle, normalized);
+                await this.markCheckpointComplete(checkpoint, 'brief');
+            }
+
+            if (!checkpoint.draft) {
+                currentStage = 'drafting';
+                onProgress?.('stage', {
+                    stage: currentStage,
+                    wordEstimate: checkpoint.selectedOpportunity.estimatedReadTime * 220,
+                });
+                checkpoint.draft = await this.generateDraft(
+                    checkpoint.articleBrief,
+                    checkpoint.researchBundle,
+                    normalized
+                );
+                await this.markCheckpointComplete(checkpoint, 'draft');
+            }
+
+            if (!checkpoint.editorialReview) {
+                currentStage = 'editing';
+                onProgress?.('stage', { stage: currentStage });
+                checkpoint.editorialReview = await this.editDraft(
+                    checkpoint.draft,
+                    checkpoint.articleBrief,
+                    checkpoint.researchBundle,
+                    normalized
+                );
+                await this.markCheckpointComplete(checkpoint, 'edit');
+            }
+
+            if (!checkpoint.editorialReview.qualityGate) {
+                currentStage = 'quality';
+                const qualityRun = this.checkpointToRun(checkpoint);
+                const improvement = await ArticleQualityService.improveIfNeeded(qualityRun);
+                checkpoint.editorialReview = {
+                    ...qualityRun.editorialReview,
+                    qualityGate: improvement.qualityGate,
+                };
+                onProgress?.('stage', {
+                    stage: currentStage,
+                    score: improvement.finalScore,
+                    improved: improvement.improved,
+                });
+                await this.markCheckpointComplete(checkpoint, 'quality');
+            }
+
+            currentStage = 'saving';
+            const runBase: Omit<PipelineRun, 'artifacts'> = {
+                id: checkpoint.id,
+                createdAt: checkpoint.createdAt,
+                request: checkpoint.request,
+                opportunities: checkpoint.opportunities,
+                selectedOpportunity: checkpoint.selectedOpportunity,
+                researchBundle: checkpoint.researchBundle,
+                articleBrief: checkpoint.articleBrief,
+                draft: checkpoint.draft,
+                editorialReview: checkpoint.editorialReview,
+            };
+            const artifacts = await ArtifactStorageService.saveRunArtifacts({
+                runDirectory: checkpoint.runDirectory,
+                run: runBase,
+                researchBundle: checkpoint.researchBundle,
+                articleBrief: checkpoint.articleBrief,
+                draft: checkpoint.draft,
+                editorialReview: checkpoint.editorialReview,
+            });
+            await ArtifactStorageService.deleteCheckpoint(checkpoint.runDirectory);
+
+            Logger.info(`Pipeline run ${runBase.id} saved to ${artifacts.directory}`);
+            const run = { ...runBase, artifacts };
+            onProgress?.('complete', run);
+            return run;
+        } catch (error: any) {
+            checkpoint.status = 'failed';
+            checkpoint.failedStage = currentStage;
+            checkpoint.error = error?.message || 'Pipeline failed';
+            checkpoint.updatedAt = new Date().toISOString();
+            try {
+                await ArtifactStorageService.saveCheckpoint(checkpoint);
+            } catch (checkpointError) {
+                Logger.error('Failed to persist pipeline failure checkpoint', checkpointError);
+            }
+            throw error;
+        } finally {
+            PipelineExecutionRegistry.finish(checkpoint.id);
+        }
+    }
+
+    private async markCheckpointComplete(
+        checkpoint: PipelineCheckpoint,
+        completedStage: PipelineCheckpoint['completedStage']
+    ): Promise<void> {
+        checkpoint.completedStage = completedStage;
+        checkpoint.status = 'running';
+        checkpoint.failedStage = undefined;
+        checkpoint.error = undefined;
+        checkpoint.updatedAt = new Date().toISOString();
+        await ArtifactStorageService.saveCheckpoint(checkpoint);
+    }
+
+    private checkpointToRun(checkpoint: PipelineCheckpoint): PipelineRun {
+        if (!checkpoint.researchBundle || !checkpoint.articleBrief || !checkpoint.draft || !checkpoint.editorialReview) {
+            throw new Error('Checkpoint is missing data required for quality review');
+        }
+
+        return {
+            id: checkpoint.id,
+            createdAt: checkpoint.createdAt,
+            request: checkpoint.request,
+            opportunities: checkpoint.opportunities,
+            selectedOpportunity: checkpoint.selectedOpportunity,
+            researchBundle: checkpoint.researchBundle,
+            articleBrief: checkpoint.articleBrief,
+            draft: checkpoint.draft,
+            editorialReview: checkpoint.editorialReview,
+            artifacts: { directory: checkpoint.runDirectory, files: {} },
+        };
     }
 
     async discoverOpportunities(
@@ -207,8 +347,13 @@ ${run.editorialReview.finalMarkdown}`;
             subreddits.push(request.selectedOpportunity.sourceSubreddit);
         }
 
-        if (subreddits.length === 0) {
-            throw new ApiError(400, 'At least one subreddit is required');
+        const redditPostUrl = request.redditPostUrl?.trim() || undefined;
+        if (redditPostUrl && !isSupportedRedditPostUrl(redditPostUrl)) {
+            throw new ApiError(400, 'Enter a valid Reddit post URL (comments link, Reddit share link, or redd.it link)');
+        }
+
+        if (subreddits.length === 0 && !redditPostUrl) {
+            throw new ApiError(400, 'At least one subreddit or Reddit post URL is required');
         }
 
         const writingMode = this.normalizeWritingMode(request.writingMode);
@@ -225,6 +370,64 @@ ${run.editorialReview.finalMarkdown}`;
             outputDir: request.outputDir?.trim() || undefined,
             selectedOpportunity: request.selectedOpportunity,
             opportunitiesSnapshot: request.opportunitiesSnapshot,
+            redditPostUrl,
+        };
+    }
+
+    private async discoverDirectPostOpportunity(
+        request: NormalizedPipelineRequest,
+        onProgress?: PipelineProgressCallback
+    ): Promise<TopicOpportunity> {
+        let locator = parseRedditPostUrl(request.redditPostUrl || '');
+        if (!locator && request.redditPostUrl) {
+            const resolvedUrl = await this.redditService.resolveRedditPostUrl(request.redditPostUrl);
+            locator = parseRedditPostUrl(resolvedUrl);
+        }
+        if (!locator) {
+            throw new ApiError(400, 'Reddit share link did not resolve to a post');
+        }
+
+        onProgress?.('stage', { stage: 'discovering', source: 'reddit-post', url: request.redditPostUrl });
+        const post = await this.redditService.getPostById(locator.postId);
+        if (!post) {
+            throw new ApiError(404, 'Reddit post not found or no longer accessible');
+        }
+
+        const analysis = await TrendingTopicsService.analyzeTrendingTopics([post], { theme: request.theme });
+        const opportunity = this.buildOpportunities([{
+            subreddit: post.subreddit,
+            posts: [post],
+            analysis,
+        }])[0] || this.createFallbackDirectOpportunity(post);
+
+        onProgress?.('stage', {
+            stage: 'opportunities',
+            count: 1,
+            topTopic: opportunity.topic,
+            selected: true,
+            source: 'reddit-post',
+        });
+        return opportunity;
+    }
+
+    private createFallbackDirectOpportunity(post: CleanRedditPost): TopicOpportunity {
+        const engagement = Math.min(100, Math.round((post.score + post.num_comments * 2) / 10));
+        return {
+            id: `${post.subreddit}-${post.id}`,
+            topic: post.title,
+            category: 'General interest',
+            sourceSubreddit: post.subreddit,
+            engagementScore: engagement,
+            viralPotential: engagement,
+            mediumSuccessProbability: engagement,
+            score: engagement,
+            keyThemes: [post.title],
+            storyAngles: ['Develop the central tension and lived perspectives in this discussion.'],
+            targetAudience: 'curious readers interested in thoughtful, practical insight',
+            estimatedReadTime: 6,
+            hooks: [post.title],
+            relevantPosts: [post],
+            whyItWorks: 'A user-selected discussion with enough substance to develop into a focused story.',
         };
     }
 
@@ -300,7 +503,11 @@ ${run.editorialReview.finalMarkdown}`;
         };
     }
 
-    private async gatherResearchBundle(opportunity: TopicOpportunity, request: Pick<NormalizedPipelineRequest, 'topicsToGather' | 'theme' | 'writingMode'>): Promise<ResearchBundle> {
+    private async gatherResearchBundle(
+        opportunity: TopicOpportunity,
+        request: Pick<NormalizedPipelineRequest, 'topicsToGather' | 'theme' | 'writingMode'>,
+        runDirectory: string
+    ): Promise<ResearchBundle> {
         const postIds = opportunity.relevantPosts.slice(0, request.topicsToGather + 2).map(post => post.id);
         const material = await this.referenceMaterialService.gatherReferenceMaterial(
             opportunity.topic,
@@ -308,6 +515,10 @@ ${run.editorialReview.finalMarkdown}`;
             opportunity.sourceSubreddit,
             { theme: request.theme, writingMode: request.writingMode }
         );
+        await this.referenceMaterialService.saveReferenceMaterial(material, {
+            outputDir: runDirectory,
+            basename: 'reference-material',
+        });
         return this.toResearchBundle(opportunity, material);
     }
 
@@ -365,6 +576,7 @@ ${run.editorialReview.finalMarkdown}`;
             theme: request.theme,
             writingMode: request.writingMode,
             outputDir: request.outputDir,
+            redditPostUrl: request.redditPostUrl,
             selectedOpportunityId: selectedOpportunity.id,
         };
     }

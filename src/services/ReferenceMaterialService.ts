@@ -1,3 +1,5 @@
+import fs from 'fs/promises';
+import path from 'path';
 import { RedditService } from './RedditService';
 import { Logger } from '../utils/logger';
 import { config, genAI } from '../config/config';
@@ -324,14 +326,15 @@ Return strict JSON:
         }
     }
 
-    async saveReferenceMaterial(material: ReferenceMaterial): Promise<string> {
-        const fs = require('fs').promises;
-        const path = require('path');
-        
-        const outputDir = path.join(process.cwd(), 'reference-materials');
+    async saveReferenceMaterial(
+        material: ReferenceMaterial,
+        options: { outputDir?: string; basename?: string } = {}
+    ): Promise<string> {
+        const outputDir = options.outputDir || path.join(process.cwd(), 'reference-materials');
         await fs.mkdir(outputDir, { recursive: true });
-        
-        const filename = `${material.topicId}-reference.json`;
+
+        const basename = options.basename || `${material.topicId}-reference`;
+        const filename = `${basename}.json`;
         const filepath = path.join(outputDir, filename);
         
         await fs.writeFile(filepath, JSON.stringify(material, null, 2), 'utf8');
@@ -339,7 +342,8 @@ Return strict JSON:
         
         // Also create a markdown summary
         const markdownContent = this.generateMarkdownSummary(material);
-        const mdFilepath = path.join(outputDir, `${material.topicId}-summary.md`);
+        const summaryBasename = options.basename ? `${basename}-summary` : `${material.topicId}-summary`;
+        const mdFilepath = path.join(outputDir, `${summaryBasename}.md`);
         await fs.writeFile(mdFilepath, markdownContent, 'utf8');
         
         return filepath;
